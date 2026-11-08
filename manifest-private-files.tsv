@@ -1,0 +1,19 @@
+core	/home/core/projects/website-city/.env.bak-ticket
+core	/home/core/projects/website-city/.env.dev-games
+core	/home/core/projects/website-city/certificates/localhost-key.pem
+core	/home/core/projects/website-city/certificates/localhost.pem
+core	/home/core/projects/website-city/.env.games-dev
+core	/home/core/projects/website-city/ssl/server.key
+core	/home/core/projects/website-city/.env.claude
+core	/home/core/projects/website-city/.env
+core	/home/core/projects/website-status/.env
+core	/home/core/projects/spy-discord-bot/.env
+core	/home/core/projects/tmc-app/.secrets/tmc-updater.key
+core	/home/core/projects/nightly/.env
+core	/home/core/projects/zees-games/.env
+gamedev	/home/gamedev/projects/godot/.env.dev
+gamedev	/home/gamedev/projects/godot/.env
+gamedev	/home/gamedev/projects/pterodactyl/panel/.env
+gamedev	/home/gamedev/storepack-work/keys/e2e.key
+core	/home/core/projects/nightly/data/nightly.db
+core	/home/christian/.claude/projects/-home-christian/memory/ (agent memory)
