@@ -4,7 +4,7 @@ core	/home/core/projects/nightly	git@github.com:gamemann/nightly	main
 core	/home/core/projects/nightly-env	git@github.com:gamemann/nightly-env.git	main
 core	/home/core/projects/spy	git@github.com:modcommunity/spy.git	main
 core	/home/core/projects/spy-discord-bot	git@github.com:modcommunity/spy-discord-bot.git	main
-core	/home/core/projects/storez	git@github.com:modcommunity/storez.git	log-rate-limited
+core	/home/core/projects/storez	git@github.com:modcommunity/storez.git	main
 core	/home/core/projects/tmc-app	git@github.com:modcommunity/tmc-app.git	main
 core	/home/core/projects/tmc-cli	git@github.com:modcommunity/tmc-cli.git	main
 core	/home/core/projects/tmc-global	git@github.com:modcommunity/shared.git	main
@@ -107,7 +107,7 @@ gamedev	/home/gamedev/projects/godot/hide-n-seek-maps	git@github.com:zees-games/
 gamedev	/home/gamedev/projects/godot/lam-maps	git@github.com:zees-games/lam-maps.git	main
 gamedev	/home/gamedev/projects/godot/mg-buses-from-hell	git@github.com:zees-games/mg-buses-from-hell.git	main
 gamedev	/home/gamedev/projects/godot/mg-dangerous-delivery	git@github.com:zees-games/mg-dangerous-delivery.git	main
-gamedev	/home/gamedev/projects/godot/mg-deathrun	git@github.com:zees-games/game-deathrun.git	dr-spectate-tap
+gamedev	/home/gamedev/projects/godot/mg-deathrun	git@github.com:zees-games/game-deathrun.git	main
 gamedev	/home/gamedev/projects/godot/mg-deathrun-maps	git@github.com:zees-games/mg-deathrun-maps.git	main
 gamedev	/home/gamedev/projects/godot/mg-look-at-me	git@github.com:zees-games/mg-look-at-me.git	main
 gamedev	/home/gamedev/projects/godot/mg-prop-hunt	git@github.com:zees-games/game-prop-hunt.git	main
