@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+# hv: run a suite or scene through `heavy` in the ONE form dot-bootstrap/tools/gpu.sh can offload to the staging
+# boxes (cwd = a worktree directly under ~/wt or a checkout under ~/godot; `[timeout N] ./game.sh [--no-parse] test [suites]`
+# or `[timeout N] godot --headless --path . res://x.tscn`; no bash -c wrapper, no GODOT=, no absolute --path, no
+# GPU_/HEAVY_ env). Anything else queues behind dev02's 5 build slots and the boxes sit idle.
+#
+#   hv <worktree> game [--no-parse] test [suite...]      full or partial game suite
+#   hv <worktree> scene res://examples/x.tscn [-- args]  one headless scene
+#   hv <worktree> import                                  godot --headless --import (local: not offerable)
+#   hv <worktree> local <command...>                      anything else, local lane (use rarely)
+# HV_TIMEOUT seconds (default 2400). Output goes to stdout/stderr: redirect it yourself (`> log 2>&1`).
+# Run as the work user:  sudo -u gamedev /home/gamedev/bin/hv <worktree> ...
+set -u
+[ $# -ge 2 ] || { sed -n '2,13p' "$0"; exit 2; }
+wt=$1; mode=$2; shift 2
+cd "$wt" || { echo "hv: no such worktree $wt" >&2; exit 2; }
+[ -f project.godot ] || [ "$mode" = local ] || { echo "hv: $wt has no project.godot (only 'hv <dir> local ...' works for non-Godot repos)" >&2; exit 2; }
+export PATH=/home/gamedev/.local/bin:$PATH
+case "$PWD" in
+  /home/gamedev/wt/*/*) echo "hv: WARNING $PWD is nested: not offerable to the boxes (needs ~/wt/<name> directly)" >&2 ;;
+esac
+unset GODOT GPU_OFFLOAD
+t=${HV_TIMEOUT:-2400}
+
+# Pre-flight (2026-11-07, v2 same day): a fresh/zombie worktree has only tracked files. It links what the project needs
+# from /home/gamedev/godot/<repo>/addons/<addon> (repo = addon with _ -> -; fallbacks: the main checkout, then any
+# ~/godot/*/addons/<addon>):
+#   * addons named in .gitignore ('/addons/<n>' with or without trailing slash)
+#   * addons referenced by res://addons/<n> in project.godot (plugins, autoloads) that are not present
+#   * dangling symlinks left in addons/ (committed relative links that do not resolve from ~/wt)
+#   * every addon symlink in the MAIN checkout's addons/ (what the repo itself needs; catches unlisted ones)
+#   * transitively: each linked addon's source repo has its own addons/ links (dot-cloud -> dot_core ...): same rule
+#   * '# bootstrap-link: <src>' content entries (any repo with a .gitignore; game.sh is NOT required: library repos
+#     such as dot-map / dot-player-char / dot-radio have none, which is why v1 skipped them), plus an empty .stores
+# Fails HERE (exit 3) if a hard need cannot be resolved. HV_NO_PREFLIGHT=1 skips it. Repos with no project.godot
+# (dot-map-convert is Python) only support `hv <dir> local ...`.
+hv_resolve() { # addon name -> prints source dir
+  local n=$1 d r=${1//_/-}
+  for d in "/home/gamedev/godot/$r/addons/$n" ${main:+"$main/addons/$n"} /home/gamedev/godot/*/addons/"$n" /home/gamedev/projects/godot/*/addons/"$n"; do
+    [ -d "$d" ] && { readlink -f "$d"; return 0; }
+  done
+  return 1
+}
+hv_preflight() {
+  [ -f .gitignore ] || [ -f project.godot ] || return 0
+  local main common n t d path src missing="" queue=() i
+  declare -A seen
+  common=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null) && main=$(dirname "$common") || main=""
+  [ "$main" = "$PWD" ] && main=""
+  # hard needs
+  [ -f .gitignore ] && while read -r n; do queue+=("$n"); done < <(sed -n 's|^/addons/\([A-Za-z0-9_]*\)/\{0,1\}[[:space:]]*$|\1|p' .gitignore)
+  [ -f project.godot ] && while read -r n; do queue+=("$n"); done < <(grep -oE 'res://addons/[A-Za-z0-9_]+' project.godot | sed 's|res://addons/||' | sort -u)
+  [ -d addons ] && while read -r d; do queue+=("${d##*/}"); done < <(find addons -maxdepth 1 -xtype l 2>/dev/null)
+  if [ -n "$main" ] && [ -d "$main/addons" ]; then
+    while read -r d; do queue+=("${d##*/}"); done < <(find "$main/addons" -maxdepth 1 -type l 2>/dev/null)
+  fi
+  i=0
+  while [ $i -lt ${#queue[@]} ]; do
+    n=${queue[$i]}; i=$((i+1))
+    [ -n "${seen[$n]:-}" ] && continue; seen[$n]=1
+    if [ ! -e "addons/$n" ]; then
+      if t=$(hv_resolve "$n"); then
+        mkdir -p addons && ln -sfn "$t" "addons/$n" && echo "hv: linked addons/$n -> $t" >&2
+      else missing="$missing addons/$n"; continue; fi
+    fi
+    # transitive: the source repo's own addon links (<repo>/addons/<dep> next to addons/<n>)
+    t=$(readlink -f "addons/$n" 2>/dev/null) || continue
+    d=${t%/*}   # <repo>/addons
+    [ -d "$d" ] && while read -r src; do queue+=("${src##*/}"); done < <(find "$d" -maxdepth 1 -type l 2>/dev/null)
+  done
+  [ -f .gitignore ] && while IFS=$'\t' read -r path src; do
+    [ -n "$path" ] || continue; path=${path#/}; path=${path%/}
+    [ -e "$path" ] && continue
+    mkdir -p "$(dirname "$path")"
+    if [ -n "$main" ] && [ -e "$main/$path" ]; then ln -sfn "$(readlink -f "$main/$path")" "$path" && echo "hv: linked $path" >&2
+    elif [ "${path##*/}" = ".stores" ]; then mkdir -p "$path" && echo "hv: created empty $path (no art stores on this box; maps draw low-detail art)" >&2
+    elif [ -e "/home/gamedev/godot/$src" ]; then ln -sfn "/home/gamedev/godot/$src" "$path" && echo "hv: linked $path -> ~/godot/$src" >&2
+    else missing="$missing $path(from $src)"; fi
+  done < <(awk '/^# bootstrap-link: /{src=$3; next} src!="" && /^\//{print $0 "\t" src} {src=""}' .gitignore)
+  if [ -n "$missing" ]; then
+    echo "hv: PRE-FLIGHT FAILED in $PWD: cannot resolve:$missing" >&2
+    echo "hv: fix: tools/link_worktree.sh <main checkout> (if the repo has it) or link them by hand; nothing was submitted." >&2
+    exit 3
+  fi
+}
+case $mode in game|scene|import) [ "${HV_NO_PREFLIGHT:-0}" = 1 ] || hv_preflight ;; esac
+case $mode in
+  game)   exec heavy -- timeout "$t" ./game.sh "$@" ;;
+  scene)  exec heavy -- timeout "$t" godot --headless --path . "$@" ;;
+  import) exec heavy -- timeout "$t" godot --headless --path . --import ;;
+  local)  exec heavy -- "$@" ;;
+  *) echo "hv: unknown mode $mode" >&2; exit 2 ;;
+esac

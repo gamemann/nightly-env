@@ -1,0 +1,5 @@
+SHELL=/bin/bash
+MAILTO=""
+*/10 * * * * /home/gamedev/projects/godot/dot-bootstrap/tools/queue-watch.sh
+* * * * * /usr/bin/php /home/gamedev/projects/pterodactyl/panel/artisan schedule:run >> /dev/null 2>&1
+*/3 * * * * /home/gamedev/bin/fleet-watchdog.sh

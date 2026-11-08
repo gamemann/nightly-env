@@ -1,0 +1,16 @@
+# Dev servers for tmcdev.net: website-city :3002 and website-processing :3003, kept up across ssh sessions and reboots (linger is on).
+[Unit]
+Description=stack dev servers (city, processing)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/stack
+Environment=PATH=/usr/local/bin:/usr/bin:/bin:/usr/games
+ExecStart=/bin/bash ./dev.sh city processing
+KillMode=control-group
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target

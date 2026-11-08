@@ -1,0 +1,20 @@
+#!/bin/bash
+# ph-smoke: website-city route smoke sweep entirely on PH, production mode (next build + next start on PH, Chromium on PH).
+#   ph-smoke [claude|default|games] [playwright args...]     claude -> DB tmc_claude, default -> tmc_dev, games -> dev_games
+# DB/Redis/ClickHouse are the dev02 ones, reached over the network at 10.50.0.112 (dev only). Checkout: ~core/smoke/city-devdb
+# (rsync'd by this script from the given SMOKE_SRC, default ~core/wt/city-devdb). Run as christian.
+set -u
+prof=${1:-claude}; [ $# -gt 0 ] && shift
+case $prof in claude) envf=.env.claude;; default) envf=;; games) envf=.env.dev-games;; *) echo "bad profile"; exit 2;; esac
+src=${SMOKE_SRC:-/home/core/wt/city-devdb}; H=ph-tmc-dev
+rsync -az --rsync-path="sudo -n -u core rsync" --exclude=/node_modules --exclude='/.next*' --exclude=/.git --exclude=/tests/.artifacts --exclude=/tests/.report --exclude='/.env*' \
+  "$src/" "$H:/home/core/smoke/city-devdb/" 2>&1 | grep -v 'Permission denied\|some files' 
+exec ssh $H "sudo -n -u core bash -s" <<EOF
+cd ~/smoke/city-devdb
+set -a; . ./.env; [ -n "$envf" ] && . ./$envf; set +a
+export DATABASE_URL=\${DATABASE_URL//127.0.0.1/10.50.0.112} CH_HOST=http://10.50.0.112:8123 REDIS_URL=redis://10.50.0.112:6379
+export SMOKE_PORT=3092 NODE_OPTIONS=--max-old-space-size=6144 CI=
+unset SMOKE_BASE_URL
+echo "ph-smoke: \${DATABASE_URL%%\?*}" | sed -E 's#//[^@]*@#//#' >&2
+heavy -- npx tsx tests/smoke/prepare.ts && heavy -- npx playwright test --reporter=line $*
+EOF
