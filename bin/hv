@@ -147,6 +147,33 @@ hv_preflight() {
 # suite's own check lines). No suite names = every suite (`./game.sh suites`) plus the parse pass (local check lane;
 # --no-parse skips it), like `game.sh test`. T = max(HV_TIMEOUT, the suite's MIN_TIMEOUTS + 900, 1800).
 # Output: ~/.fleet/shard/runs/<worktree>-<time>-<pid>/{report.txt,<suite>.out}. Exit 0 = all passed, 1 = a failure.
+# hv_guard (2026-11-09): parse-error fast fail. A scene/suite with a broken script printed "SCRIPT ERROR: Parse Error" /
+# "Failed to load script" and then idled until the 20 min watchdog (16 slot-hours/day). hv_guard runs the command with its
+# output in a temp file (streamed to our stdout as it grows) and, when that file has such a line AND has not grown for
+# HV_PARSE_QUIET seconds (default 180), kills the job's process tree and exits 66 with a message. Works for offloaded
+# jobs too (their output comes back through the ssh). HV_NO_GUARD=1 disables. rc 66 = broken script, fix it and rerun.
+hv_guard() {
+  if [ "${HV_NO_GUARD:-0}" = 1 ]; then "$@"; return $?; fi
+  local tmp pid tpid last=-1 lastt now sz q=${HV_PARSE_QUIET:-180} rc hit
+  tmp=$(mktemp /tmp/hv-guard.XXXXXX) || { "$@"; return $?; }
+  setsid "$@" >"$tmp" 2>&1 </dev/null & pid=$!
+  tail -n +1 -f --pid=$pid "$tmp" 2>/dev/null & tpid=$!
+  lastt=$(date +%s)
+  while kill -0 "$pid" 2>/dev/null; do
+    sleep 5
+    now=$(date +%s); sz=$(stat -c %s "$tmp" 2>/dev/null || echo 0)
+    if [ "$sz" != "$last" ]; then last=$sz; lastt=$now; continue; fi
+    [ $((now - lastt)) -ge "$q" ] || continue
+    hit=$(grep -m1 -E 'SCRIPT ERROR: (Parse|Compile) Error|Failed to load script|Parse Error:' "$tmp" 2>/dev/null) || continue
+    kill -TERM -- "-$pid" $(hv_desc "$pid") 2>/dev/null; sleep 3; kill -KILL -- "-$pid" $(hv_desc "$pid") 2>/dev/null
+    { echo "hv: BROKEN SCRIPT: the job logged a script parse/compile error and made no progress for ${q}s; killed it (exit 66)."
+      echo "hv: first error line: ${hit:0:300}"
+      echo "hv: fix the script (parse check: ./game.sh parse, or godot --headless --import) and run again."; } | tee -a "$tmp"
+    kill "$tpid" 2>/dev/null; rm -f "$tmp"; return 66
+  done
+  wait "$pid"; rc=$?
+  wait "$tpid" 2>/dev/null; rm -f "$tmp"; return $rc
+}
 hv_desc() { local c; for c in $(pgrep -P "$1" 2>/dev/null); do hv_desc "$c"; echo "$c"; done; }
 hv_shard() {
   local noparse=0 jobs=${HV_SHARD_JOBS:-} suites=() s all=0
@@ -199,7 +226,7 @@ hv_shard() {
         T=$t; [ $((mt + 900)) -gt "$T" ] && T=$((mt + 900)); [ "$T" -lt 1800 ] && T=1800
         for try in 1 2; do
           st=$(date +%s)
-          HV_SHARD=1 HEAVY_JOB_MAX_MIN=$((T / 60 + 5)) heavy -- timeout "$T" ./game.sh --no-parse test "$s" > "$run/$s.out" 2>&1 </dev/null
+          HV_SHARD=1 HEAVY_JOB_MAX_MIN=$((T / 60 + 5)) hv_guard heavy -- timeout "$T" ./game.sh --no-parse test "$s" > "$run/$s.out" 2>&1 </dev/null
           rc=$?; en=$(date +%s)
           if [ "$try" = 1 ]; then case $rc in 75|137|255)
             mv -f "$run/$s.out" "$run/$s.out.try1"; echo "hv: shard: $s exited $rc (killed/lost); running it again" >&2; continue ;; esac; fi
@@ -254,9 +281,9 @@ if [ "$mode" = scene ] && [ "${HV_NO_IMPORT:-0}" != 1 ] && [ ! -f .godot/global_
   heavy -- timeout 1800 godot --headless --path . --import </dev/null >&2 || echo "hv: WARNING the import exited $?; running the scene anyway" >&2
 fi
 case $mode in
-  game)   exec heavy -- timeout "$t" ./game.sh "$@" ;;
+  game)   hv_guard heavy -- timeout "$t" ./game.sh "$@"; exit $? ;;
   shard)  hv_shard "$@" ;;
-  scene)  exec heavy -- timeout "$t" godot --headless --path . "$@" ;;
+  scene)  hv_guard heavy -- timeout "$t" godot --headless --path . "$@"; exit $? ;;
   import) exec heavy -- timeout "$t" godot --headless --path . --import ;;
   local)  exec heavy -- "$@" ;;
   *) echo "hv: unknown mode $mode" >&2; exit 2 ;;
