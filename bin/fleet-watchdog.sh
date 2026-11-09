@@ -1,32 +1,60 @@
 #!/usr/bin/env bash
 # fleet-watchdog (cron, every 3 min, as gamedev): keeps dev02's heavy lane moving without anyone watching it.
 #  1. kills hung headless Godot jobs: idle (<2% CPU) for >20 min, older than 48 min (heavy's own cap is 45), pegged >=90% CPU for >25 min under
-#     --quit-after (a finished scene would have quit), or orphaned (parent init) for >10 min
+#     --quit-after (a finished scene would have quit), or orphaned (parent init) for >10 min; and (2026-11-08) after a script parse
+#     error: idle (<2% CPU measured since the last run, >=150 s) and its stdout log, a file quiet for >=3 min, says
+#     "Failed to load script" / "SCRIPT ERROR: Parse Error" (Godot then waits forever; hv scene imports first to avoid it).
+#     The same >48 min / >25 min idle rules run on staging, staging02 and PH (PH's janitor only kills after 3 h).
 #  2. finds jobs waiting in dev02's queue that the offload hook can NOT send to staging/staging02 (bash -c wrappers,
 #     GODOT=, absolute --path, GPU_OFFLOAD=0) while a box has free suite slots: lists them in ineligible.txt
 #  3. writes health.txt (one line per fact) and an actions log: ~/.fleet/{health.txt,ineligible.txt,actions.log}
 set -u
-D=$HOME/.fleet; mkdir -p "$D"; export PATH=/home/gamedev/.local/bin:$PATH
+D=$HOME/.fleet; mkdir -p "$D"; export PATH=/home/gamedev/.local/bin:/usr/local/bin:$PATH
 ts() { date '+%F %T'; }
 act() { printf '%s %s\n' "$(ts)" "$*" >> "$D/actions.log"; }
 touch "$D/actions.log"; [ "$(wc -c < "$D/actions.log")" -gt 500000 ] && tail -n 2000 "$D/actions.log" > "$D/actions.log.new" && mv "$D/actions.log.new" "$D/actions.log"
 
 # 1. stuck jobs
 killed=0
+# ps pcpu is the average over the whole life of the process; the parse-error rule needs the CPU used since the last run,
+# so each run keeps "pid starttime cpu-ticks epoch" per godot (from /proc/<pid>/stat) and compares with the previous one.
+declare -A prev
+[ -f "$D/godot-cpu.prev" ] && while read -r p a b c; do prev[$p]="$a $b $c"; done < "$D/godot-cpu.prev"
+now=$(date +%s); hz=$(getconf CLK_TCK 2>/dev/null || echo 100); : > "$D/godot-cpu.next"
 while read -r pid ppid et pcpu cmd; do
   case "$cmd" in /home/gamedev/.local/bin/godot*|godot*) ;; *) continue ;; esac   # the godot binary itself: never ssh/bash wrappers (an offloaded job is an idle ssh by design)
   case "$cmd" in *--headless*|*--script*) ;; *) continue ;; esac
   why=
+  st=; tk=
+  if s=$(cat "/proc/$pid/stat" 2>/dev/null); then
+    read -ra f <<< "${s##*) }"   # fields from 3 on: utime=14, stime=15, starttime=22
+    tk=$(( ${f[11]:-0} + ${f[12]:-0} )); st=${f[19]:-}
+    echo "$pid $st $tk $now" >> "$D/godot-cpu.next"
+  fi
   [ "$et" -gt 2900 ] && why="running ${et}s (>48 min)"
   [ -z "$why" ] && [ "$ppid" = 1 ] && [ "$et" -gt 600 ] && why="orphan (parent init) ${et}s"
   [ -z "$why" ] && [ "$et" -gt 1500 ] && [ "${pcpu%.*}" -ge 90 ] && case "$cmd" in *--quit-after*) why="pegged ${pcpu}% for ${et}s under --quit-after" ;; esac
+  if [ -z "$why" ] && [ "$et" -gt 180 ] && [ -n "$st" ] && [ -n "${prev[$pid]:-}" ]; then
+    read -r pst ptk pnow <<< "${prev[$pid]}"
+    dt=$((now - pnow))
+    if [ "$pst" = "$st" ] && [ "$dt" -ge 150 ] && [ $(( (tk - ptk) * 100 / (hz * dt) )) -lt 2 ]; then
+      lf=$(readlink "/proc/$pid/fd/1" 2>/dev/null)
+      if [ -f "$lf" ] && [ "$(stat -c %s "$lf" 2>/dev/null || echo 0)" -lt 209715200 ] &&
+         [ $(( now - $(stat -c %Y "$lf" 2>/dev/null || echo "$now") )) -ge 180 ] &&
+         grep -qE 'Failed to load script|SCRIPT ERROR: Parse Error' "$lf" 2>/dev/null; then
+        why="parse error in $lf, idle (<2% CPU over the last ${dt}s, log quiet), ${et}s old"
+      fi
+    fi
+  fi
   [ -z "$why" ] && [ "$et" -gt 1200 ] && [ "${pcpu%.*}" -lt 2 ] && why="idle (${pcpu}% CPU over ${et}s): waiting on something that will never come"
   [ -n "$why" ] && { kill "$pid" 2>/dev/null && { act "KILLED pid $pid: $why: ${cmd:0:160}"; killed=$((killed+1)); }; }
 done < <(ps -u gamedev -o pid=,ppid=,etimes=,pcpu=,cmd= 2>/dev/null)
+mv -f "$D/godot-cpu.next" "$D/godot-cpu.prev"
 
 
-# 1b. the same rule on the staging boxes (a hung offloaded godot holds a box suite slot; queue-watch.sh only clears orphaned Xvfb/gate waiters)
-for spec in "staging:gamedev@staging.deacon.internal" "staging02:gamedev@staging02.deacon.internal"; do
+# 1b. the same rule on the staging boxes and PH (a hung offloaded godot holds a box suite slot; queue-watch.sh only clears orphaned
+# Xvfb/gate waiters, PH's janitor only kills after 3 h; host from dot-bootstrap/tools/gpu.sh set_box)
+for spec in "staging:gamedev@staging.deacon.internal" "staging02:gamedev@staging02.deacon.internal" "ph:gamedev@ph-tmc-dev.deacon.internal"; do
   box=${spec%%:*}; dest=${spec#*:}
   out=$(timeout 40 ssh -i "$HOME/.ssh/gpu-laptop" -o ConnectTimeout=8 -o BatchMode=yes "$dest" '
     ps -eo pid=,etimes=,pcpu=,comm=,args= | while read -r pid et pcpu comm args; do

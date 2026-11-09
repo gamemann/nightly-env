@@ -8,10 +8,60 @@
 #   hv <worktree> scene res://examples/x.tscn [-- args]  one headless scene
 #   hv <worktree> import                                  godot --headless --import (local: not offerable)
 #   hv <worktree> local <command...>                      anything else, local lane (use rarely)
+#   hv baseline <repo> [suite...]                         suites on origin/main, cached per commit (no suite = all)
 # HV_TIMEOUT seconds (default 2400). Output goes to stdout/stderr: redirect it yourself (`> log 2>&1`).
 # Run as the work user:  sudo -u gamedev /home/gamedev/bin/hv <worktree> ...
 set -u
 [ $# -ge 2 ] || { sed -n '2,13p' "$0"; exit 2; }
+
+# hv baseline (2026-11-08): agents made their own *base* worktrees and ran the same suites on the same main commit
+# again and again (4 worktrees at one commit; two headless_bots baselines at once on PH). This runs each suite once per
+# origin/main commit in one shared worktree (~/wt/<repo>-baseline) and keeps the result in
+# ~/.fleet/baseline/<repo>/<sha>/<suite>.{rc,log} (suite "all" = `game.sh test` with no names, parse pass included);
+# failing.txt there lists the suites that failed on main. A second caller waits on the lock and reads the cache.
+# HV_BASELINE_REFRESH=1 runs again even when cached. Exit 0 = every asked suite passes on main, 1 = some fail.
+if [ "$1" = baseline ]; then
+  repo=$2; shift 2
+  main=/home/gamedev/godot/$repo
+  [[ $repo =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]*$ ]] && git -C "$main" rev-parse --git-dir >/dev/null 2>&1 && [ -f "$main/game.sh" ] ||
+    { echo "hv: baseline needs a game repo under /home/gamedev/godot (with game.sh): $repo" >&2; exit 2; }
+  base=$HOME/.fleet/baseline; mkdir -p "$base"
+  exec 8>>"$base/$repo.lock"
+  flock 8
+  if timeout 120 git -C "$main" fetch -q origin main 2>/dev/null; then sha=$(git -C "$main" rev-parse origin/main)
+  else sha=$(git -C "$main" rev-parse --verify -q origin/main || git -C "$main" rev-parse main)
+       echo "hv: WARNING could not fetch origin main; using the last known origin/main $sha" >&2; fi
+  dir=$base/$repo/$sha; mkdir -p "$dir"
+  wt=$HOME/wt/$repo-baseline
+  [ $# -gt 0 ] || set -- all
+  todo=()
+  for s in "$@"; do
+    [[ $s =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]*$ ]] || { echo "hv: bad suite name $s" >&2; exit 2; }
+    [ "${HV_BASELINE_REFRESH:-0}" != 1 ] && [ -f "$dir/$s.rc" ] && continue
+    todo+=("$s")
+  done
+  if [ ${#todo[@]} -gt 0 ]; then
+    [ -d "$wt" ] || git -C "$main" worktree prune 2>/dev/null
+    if [ ! -d "$wt" ]; then git -C "$main" worktree add -q --detach "$wt" "$sha" || { echo "hv: cannot make $wt" >&2; exit 2; }
+    else git -C "$wt" checkout -q -f --detach "$sha" && git -C "$wt" reset -q --hard "$sha" || { echo "hv: cannot move $wt to $sha" >&2; exit 2; }; fi
+    for s in "${todo[@]}"; do
+      echo "hv: baseline $repo ${sha:0:9} $s: running (log $dir/$s.log)" >&2
+      if [ "$s" = all ]; then "$0" "$wt" game test > "$dir/$s.log.tmp" 2>&1; else "$0" "$wt" game test "$s" > "$dir/$s.log.tmp" 2>&1; fi
+      rc=$?
+      mv -f "$dir/$s.log.tmp" "$dir/$s.log"
+      # 124/137/143 = timeout or killed, 2/3 = hv usage or pre-flight: not a result, so not cached.
+      case $rc in 2|3|124|137|143) echo "hv: baseline $s did not finish (exit $rc); not cached" >&2 ;; *) echo "$rc" > "$dir/$s.rc" ;; esac
+    done
+  fi
+  bad=0
+  for s in "$@"; do
+    rc=$(cat "$dir/$s.rc" 2>/dev/null || echo none)
+    printf 'baseline %s %s %s: %s  (%s)\n' "$repo" "${sha:0:9}" "$s" "$([ "$rc" = 0 ] && echo pass || echo "FAIL rc=$rc")" "$dir/$s.log"
+    [ "$rc" = 0 ] || bad=1
+  done
+  for f in "$dir"/*.rc; do [ -f "$f" ] && [ "$(cat "$f")" != 0 ] && basename "$f" .rc; done > "$dir/failing.txt"
+  exit $bad
+fi
 wt=$1; mode=$2; shift 2
 cd "$wt" || { echo "hv: no such worktree $wt" >&2; exit 2; }
 [ -f project.godot ] || [ "$mode" = local ] || { echo "hv: $wt has no project.godot (only 'hv <dir> local ...' works for non-Godot repos)" >&2; exit 2; }
@@ -20,6 +70,9 @@ case "$PWD" in
   /home/gamedev/wt/*/*) echo "hv: WARNING $PWD is nested: not offerable to the boxes (needs ~/wt/<name> directly)" >&2 ;;
 esac
 unset GODOT GPU_OFFLOAD
+# 2026-11-08: dev02 (47GB, swapping) ran 5 suites locally and never queued, so PH (40c, mostly idle) and staging got no offers.
+# Only 1 local build slot for hv jobs; the rest wait and are offered to PH/staging02/staging every 15 s. HEAVY_SLOTS_BUILD in env overrides.
+export HEAVY_SLOTS_BUILD=${HEAVY_SLOTS_BUILD:-1}
 t=${HV_TIMEOUT:-2400}
 
 # Pre-flight (2026-11-07, v2 same day): a fresh/zombie worktree has only tracked files. It links what the project needs
@@ -84,6 +137,13 @@ hv_preflight() {
   fi
 }
 case $mode in game|scene|import) [ "${HV_NO_PREFLIGHT:-0}" = 1 ] || hv_preflight ;; esac
+# A scene in a fresh worktree (no class cache yet) cannot resolve class_name scripts: Godot prints "Failed to load
+# script" / "Parse Error" and then idles until the watchdog kills it 20 min later (43 such kills a day, 2026-11-08).
+# Import first (heavy puts --import in the check lane, so it does not wait behind the build slot). HV_NO_IMPORT=1 skips.
+if [ "$mode" = scene ] && [ "${HV_NO_IMPORT:-0}" != 1 ] && [ ! -f .godot/global_script_class_cache.cfg ]; then
+  echo "hv: $PWD has no .godot/global_script_class_cache.cfg (fresh worktree): importing before the scene" >&2
+  heavy -- timeout 1800 godot --headless --path . --import </dev/null >&2 || echo "hv: WARNING the import exited $?; running the scene anyway" >&2
+fi
 case $mode in
   game)   exec heavy -- timeout "$t" ./game.sh "$@" ;;
   scene)  exec heavy -- timeout "$t" godot --headless --path . "$@" ;;
