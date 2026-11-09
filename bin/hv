@@ -67,7 +67,7 @@ fi
 wt=$1; mode=$2; shift 2
 cd "$wt" || { echo "hv: no such worktree $wt" >&2; exit 2; }
 [ -f project.godot ] || [ "$mode" = local ] || { echo "hv: $wt has no project.godot (only 'hv <dir> local ...' works for non-Godot repos)" >&2; exit 2; }
-export PATH=/home/gamedev/.local/bin:$PATH
+export PATH=/home/gamedev/.cargo/bin:/home/gamedev/.local/bin:$PATH   # cargo for hv local (non-login shells lack it)
 case "$PWD" in
   /home/gamedev/wt/*/*) echo "hv: WARNING $PWD is nested: not offerable to the boxes (needs ~/wt/<name> directly)" >&2 ;;
 esac
