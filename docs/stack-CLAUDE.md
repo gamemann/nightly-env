@@ -65,7 +65,7 @@ When you learn something while working, add the rule where it applies, in one li
 
 Since 2026-10-14, TMC game development (the Godot tree, `dot-*` addons, games, map repos, `docs/`) lives on **`x-tmc-dev02`**, in `~/godot` and `~/docs` there. `~/stack/game-dev` on this machine is gone; never recreate it. This VM (`x-tmc-dev01`) stays the app and web VM, and the game VM uses this one's website-city, PostgreSQL, Redis and nginx (`tmcdev.net`) rather than running its own.
 
-**You have full access to x-tmc-dev02**: `ssh -i ~/.ssh/dev02 x-tmc-dev02` (user `christian`, `x-tmc-dev02.deacon.internal`, 10.50.0.164). Read, edit, run Godot suites, commit and push there as you would here. Claude Code is installed there (`~/.local/bin/claude`); its own `~/CLAUDE.md` is the game tree's rules, read it before game work. Passwordless `sudo` works there (since 2026-10-14).
+**You have full access to x-tmc-dev02**: `ssh -i ~/.ssh/dev02 x-tmc-dev02` (user `christian`, `<dev02 internal hostname>`, `<dev02 IP>`). Read, edit, run Godot suites, commit and push there as you would here. Claude Code is installed there (`~/.local/bin/claude`); its own `~/CLAUDE.md` is the game tree's rules, read it before game work. Passwordless `sudo` works there (since 2026-10-14).
 
 **x-tmc-dev02 has full access back to this VM** (`ssh -i ~/.ssh/dev01 x-tmc-dev01` from there), and Claude sessions there are expected to read, edit and run things in `~/stack`, start dev servers, and tunnel to PostgreSQL/Redis. Do not treat a dev02 session's work here as foreign.
 

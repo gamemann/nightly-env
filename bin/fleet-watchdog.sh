@@ -58,8 +58,10 @@ mv -f "$D/godot-cpu.next" "$D/godot-cpu.prev"
 
 
 # 1b. the same rule on the staging boxes and PH (a hung offloaded godot holds a box suite slot; queue-watch.sh only clears orphaned
-# Xvfb/gate waiters, PH's janitor only kills after 3 h; host from dot-bootstrap/tools/gpu.sh set_box)
-for spec in "staging:gamedev@staging.deacon.internal" "staging02:gamedev@staging02.deacon.internal" "ph:gamedev@ph-tmc-dev.deacon.internal"; do
+# Xvfb/gate waiters, PH's janitor only kills after 3 h; hosts from $FLEET_BOXES)
+# FLEET_BOXES="name:user@host ..." comes from the private env file (never in git): see README
+[ -r "${NIGHTLY_ENV_FILE:-$HOME/.config/nightly-env/env}" ] && . "${NIGHTLY_ENV_FILE:-$HOME/.config/nightly-env/env}"
+for spec in ${FLEET_BOXES:-}; do
   box=${spec%%:*}; dest=${spec#*:}
   out=$(timeout 40 ssh -i "$HOME/.ssh/gpu-laptop" -o ConnectTimeout=8 -o BatchMode=yes "$dest" '
     ps -eo pid=,ppid=,etimes=,pcpu=,comm=,args= | while read -r pid ppid et pcpu comm args; do

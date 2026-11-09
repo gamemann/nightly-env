@@ -1,0 +1,4 @@
+# owner<TAB>absolute path of a private file to back up and restore OUTSIDE this repo.
+# Copy to manifest-private-files.tsv (git-ignored) and list your real files there.
+user	/home/user/projects/app/.env
+user	/home/user/projects/app/certificates/localhost-key.pem

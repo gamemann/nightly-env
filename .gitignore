@@ -1,0 +1,14 @@
+# secrets and machine-specific files live OUTSIDE this repo (~/.config/nightly-env/env, backups); never commit them
+.env
+.env.*
+*.key
+*.pem
+*.p12
+*.db
+*.sqlite
+id_*
+.secrets/
+*.bak
+*.bak-*
+*.pre-nightly-env
+manifest-private-files.tsv

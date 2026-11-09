@@ -20,4 +20,12 @@ sudo install -m755 /home/core/projects/nightly-env/bin/heavy /usr/local/bin/heav
 Existing files are kept as `*.pre-nightly-env`. The gamedev user reads through the symlinks (`/home/core` is traversable); commit and push as `core`: `sudo -u core git -C /home/core/projects/nightly-env ...`.
 
 ## Rules
-No secrets, tokens or keys in this repo. Env files stay on the box. Edit scripts in this repo (via the symlink path is fine), then commit and push.
+No secrets, tokens, keys, internal hostnames or IPs in this repo (it is public). Private values go in `~/.config/nightly-env/env`. Edit scripts here (via the symlink path is fine), then commit and push.
+
+## Public repo: where secrets live
+This repository is public. Hostnames, IPs, credentials and key paths are NOT stored here. Scripts read them from a private env file outside the repo, `~/.config/nightly-env/env` (override with `NIGHTLY_ENV_FILE`, mode 600), e.g.:
+```
+DEVDB_HOST=<dev database host/IP>                                   # bin/ph-smoke
+FLEET_BOXES="staging:user@host staging02:user@host ph:user@host"    # bin/fleet-watchdog.sh
+```
+The list of private files to back up is `manifest-private-files.tsv` (git-ignored; see `manifest-private-files.example.tsv`). `.gitignore` blocks env files, keys, certificates and databases.
