@@ -199,7 +199,7 @@ hv_shard() {
         T=$t; [ $((mt + 900)) -gt "$T" ] && T=$((mt + 900)); [ "$T" -lt 1800 ] && T=1800
         for try in 1 2; do
           st=$(date +%s)
-          HEAVY_JOB_MAX_MIN=$((T / 60 + 5)) heavy -- timeout "$T" ./game.sh --no-parse test "$s" > "$run/$s.out" 2>&1 </dev/null
+          HV_SHARD=1 HEAVY_JOB_MAX_MIN=$((T / 60 + 5)) heavy -- timeout "$T" ./game.sh --no-parse test "$s" > "$run/$s.out" 2>&1 </dev/null
           rc=$?; en=$(date +%s)
           if [ "$try" = 1 ]; then case $rc in 75|137|255)
             mv -f "$run/$s.out" "$run/$s.out.try1"; echo "hv: shard: $s exited $rc (killed/lost); running it again" >&2; continue ;; esac; fi
