@@ -5,6 +5,9 @@
 #     error: idle (<2% CPU measured since the last run, >=150 s) and its stdout log, a file quiet for >=3 min, says
 #     "Failed to load script" / "SCRIPT ERROR: Parse Error" (Godot then waits forever; hv scene imports first to avoid it).
 #     The same >48 min / >25 min idle rules run on staging, staging02 and PH (PH's janitor only kills after 3 h).
+#     (2026-11-08) The age limit is max(48 min, the job's own `timeout N` + 2 min): a godot whose parent is
+#     `timeout N` (game.sh's per-suite limit, e.g. headless_imported=3000, or hv shard's T) is allowed to run that long,
+#     so legitimate long suites are not killed at 48 min. The idle and parse-error rules still apply to them.
 #  2. finds jobs waiting in dev02's queue that the offload hook can NOT send to staging/staging02 (bash -c wrappers,
 #     GODOT=, absolute --path, GPU_OFFLOAD=0) while a box has free suite slots: lists them in ineligible.txt
 #  3. writes health.txt (one line per fact) and an actions log: ~/.fleet/{health.txt,ineligible.txt,actions.log}
@@ -31,7 +34,9 @@ while read -r pid ppid et pcpu cmd; do
     tk=$(( ${f[11]:-0} + ${f[12]:-0} )); st=${f[19]:-}
     echo "$pid $st $tk $now" >> "$D/godot-cpu.next"
   fi
-  [ "$et" -gt 2900 ] && why="running ${et}s (>48 min)"
+  lim=2900; pa=$(ps -o args= -p "$ppid" 2>/dev/null)
+  [[ $pa =~ ^timeout\ ((-[ks]\ [^\ ]+|-[^\ ]+)\ )*([0-9]+)s?\  ]] && [ $(( ${BASH_REMATCH[3]} + 120 )) -gt $lim ] && lim=$(( ${BASH_REMATCH[3]} + 120 ))
+  [ "$et" -gt "$lim" ] && why="running ${et}s (>$((lim / 60)) min)"
   [ -z "$why" ] && [ "$ppid" = 1 ] && [ "$et" -gt 600 ] && why="orphan (parent init) ${et}s"
   [ -z "$why" ] && [ "$et" -gt 1500 ] && [ "${pcpu%.*}" -ge 90 ] && case "$cmd" in *--quit-after*) why="pegged ${pcpu}% for ${et}s under --quit-after" ;; esac
   if [ -z "$why" ] && [ "$et" -gt 180 ] && [ -n "$st" ] && [ -n "${prev[$pid]:-}" ]; then
@@ -57,11 +62,12 @@ mv -f "$D/godot-cpu.next" "$D/godot-cpu.prev"
 for spec in "staging:gamedev@staging.deacon.internal" "staging02:gamedev@staging02.deacon.internal" "ph:gamedev@ph-tmc-dev.deacon.internal"; do
   box=${spec%%:*}; dest=${spec#*:}
   out=$(timeout 40 ssh -i "$HOME/.ssh/gpu-laptop" -o ConnectTimeout=8 -o BatchMode=yes "$dest" '
-    ps -eo pid=,etimes=,pcpu=,comm=,args= | while read -r pid et pcpu comm args; do
+    ps -eo pid=,ppid=,etimes=,pcpu=,comm=,args= | while read -r pid ppid et pcpu comm args; do
       [ "$comm" = godot ] || continue
       case "$args" in *--headless*) ;; *) continue ;; esac
-      why=
-      [ "$et" -gt 2900 ] && why="running ${et}s"
+      why=; lim=2900; pa=$(ps -o args= -p "$ppid" 2>/dev/null)
+      [[ $pa =~ ^timeout\ ((-[ks]\ [^\ ]+|-[^\ ]+)\ )*([0-9]+)s?\  ]] && [ $(( ${BASH_REMATCH[3]} + 120 )) -gt $lim ] && lim=$(( ${BASH_REMATCH[3]} + 120 ))
+      [ "$et" -gt "$lim" ] && why="running ${et}s (limit ${lim}s)"
       [ -z "$why" ] && [ "$et" -gt 1500 ] && [ "${pcpu%.*}" -lt 2 ] && why="idle ${pcpu}% over ${et}s"
       [ -n "$why" ] && { kill "$pid" 2>/dev/null && echo "KILLED remote pid $pid ($why): ${args:0:120}"; }
     done' 2>&1) || out=""
@@ -71,6 +77,8 @@ done
 st=$(timeout 60 heavy --status 2>&1)
 printf '%s\n' "$st" > "$D/heavy.status"
 busy=$(grep -c '^busy  build' <<<"$st")
+# dev02's build slots (heavy.conf; was a hard-coded 5)
+nslots=$(bash -c '. /etc/heavy.conf >/dev/null 2>&1; echo "${HEAVY_SLOTS_BUILD:-}"'); [[ $nslots =~ ^[0-9]+$ ]] || nslots=5
 free_remote=$(grep -oE '[0-9]+/[0-9]+ suite slots free' <<<"$st" | awk -F'[/ ]' '{s+=$1} END{print s+0}')
 : > "$D/ineligible.txt"; waiters=0; bad=0
 while read -r pid cmd; do
@@ -87,11 +95,11 @@ while read -r pid cmd; do
 done < <(pgrep -u gamedev -f '^bash /usr/local/bin/heavy -- ' -a 2>/dev/null | sed 's/^\([0-9]*\) /\1 /')
 {
   echo "time=$(ts)"
-  echo "local_build_slots_busy=$busy/5"
+  echo "local_build_slots_busy=$busy/$nslots"
   echo "heavy_wrappers=$waiters (running+waiting)"
   echo "remote_suite_slots_free=$free_remote"
   echo "ineligible_for_offload=$bad (see ineligible.txt)"
   echo "killed_this_run=$killed"
-  [ "$busy" -ge 5 ] && [ "$free_remote" -gt 0 ] && [ "$bad" -gt 0 ] && echo "ALERT=local lane full while boxes idle: $bad jobs use a non-offerable form (use /home/gamedev/bin/hv)"
-  [ "$busy" -ge 5 ] && [ "$free_remote" -gt 4 ] && [ "$bad" = 0 ] && echo "ALERT=local lane full, boxes idle, jobs look eligible: check gpu.sh offer (heavy offers every 15 s)"
+  [ "$busy" -ge "$nslots" ] && [ "$free_remote" -gt 0 ] && [ "$bad" -gt 0 ] && echo "ALERT=local lane full while boxes idle: $bad jobs use a non-offerable form (use /home/gamedev/bin/hv)"
+  [ "$busy" -ge "$nslots" ] && [ "$free_remote" -gt 4 ] && [ "$bad" = 0 ] && echo "ALERT=local lane full, boxes idle, jobs look eligible: check gpu.sh offer (heavy offers every 15 s)"
 } > "$D/health.txt"

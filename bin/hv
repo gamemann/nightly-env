@@ -4,7 +4,9 @@
 # or `[timeout N] godot --headless --path . res://x.tscn`; no bash -c wrapper, no GODOT=, no absolute --path, no
 # GPU_/HEAVY_ env). Anything else queues behind dev02's 5 build slots and the boxes sit idle.
 #
-#   hv <worktree> game [--no-parse] test [suite...]      full or partial game suite
+#   hv <worktree> game [--no-parse] test [suite...]      full or partial game suite, ONE job (suites in a row)
+#   hv <worktree> shard [--no-parse] [--jobs N] [suite...]  the same, one job per suite on all free box slots at
+#                                                         once, one merged report (use this for 2+ suites)
 #   hv <worktree> scene res://examples/x.tscn [-- args]  one headless scene
 #   hv <worktree> import                                  godot --headless --import (local: not offerable)
 #   hv <worktree> local <command...>                      anything else, local lane (use rarely)
@@ -12,7 +14,7 @@
 # HV_TIMEOUT seconds (default 2400). Output goes to stdout/stderr: redirect it yourself (`> log 2>&1`).
 # Run as the work user:  sudo -u gamedev /home/gamedev/bin/hv <worktree> ...
 set -u
-[ $# -ge 2 ] || { sed -n '2,13p' "$0"; exit 2; }
+[ $# -ge 2 ] || { sed -n '2,15p' "$0"; exit 2; }
 
 # hv baseline (2026-11-08): agents made their own *base* worktrees and ran the same suites on the same main commit
 # again and again (4 worktrees at one commit; two headless_bots baselines at once on PH). This runs each suite once per
@@ -136,7 +138,114 @@ hv_preflight() {
     exit 3
   fi
 }
-case $mode in game|scene|import) [ "${HV_NO_PREFLIGHT:-0}" = 1 ] || hv_preflight ;; esac
+# hv shard (2026-11-08): `hv game test a b c ...` is ONE heavy job, so its suites run one after another in one box slot
+# while PH has 20 slots, staging02 8 and staging 7. `hv <wt> shard [--no-parse] [--jobs N] [suite...]` makes one heavy
+# job per suite (`timeout T ./game.sh --no-parse test <suite>`, the offerable form), runs as many at once as the boxes
+# have free slots (+1 for dev02; HV_SHARD_MAX caps it, default 16; --jobs N sets it), longest first (the last time per
+# suite is kept in ~/.fleet/shard/<repo>.times; unknown suites go first), runs a suite again once when its job was
+# killed or lost (exit 75/137/255) and merges it all into one report (pass/FAIL, box, seconds, peak MB/CPU, the
+# suite's own check lines). No suite names = every suite (`./game.sh suites`) plus the parse pass (local check lane;
+# --no-parse skips it), like `game.sh test`. T = max(HV_TIMEOUT, the suite's MIN_TIMEOUTS + 900, 1800).
+# Output: ~/.fleet/shard/runs/<worktree>-<time>-<pid>/{report.txt,<suite>.out}. Exit 0 = all passed, 1 = a failure.
+hv_desc() { local c; for c in $(pgrep -P "$1" 2>/dev/null); do hv_desc "$c"; echo "$c"; done; }
+hv_shard() {
+  local noparse=0 jobs=${HV_SHARD_JOBS:-} suites=() s all=0
+  while [ $# -gt 0 ]; do case $1 in
+    --no-parse) noparse=1; shift ;;
+    --jobs) jobs=${2:-}; shift 2 ;;
+    --jobs=*) jobs=${1#*=}; shift ;;
+    -*) echo "hv: shard: unknown option $1 (suite args after -- are not supported: use hv game for those)" >&2; exit 2 ;;
+    *) suites+=("${1%.tscn}"); shift ;;
+  esac; done
+  if [ ${#suites[@]} -eq 0 ]; then all=1; mapfile -t suites < <(./game.sh suites 2>/dev/null); fi
+  [ ${#suites[@]} -gt 0 ] || { echo "hv: shard: no suites (./game.sh suites printed none)" >&2; exit 2; }
+  for s in "${suites[@]}"; do [[ $s =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]*$ ]] || { echo "hv: shard: bad suite name $s" >&2; exit 2; }; done
+  local repo common
+  common=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null) && repo=$(basename "$(dirname "$common")") || repo=$(basename "$PWD")
+  local sd=$HOME/.fleet/shard run
+  run=$sd/runs/$(basename "$PWD")-$(date +%Y%m%d-%H%M%S)-$$; mkdir -p "$run" || exit 2
+  local times=$sd/$repo.times; touch "$times"
+  declare -A tm; local a b
+  while read -r a b; do [ -n "$a" ] && tm[$a]=$b; done < "$times"
+  for s in "${suites[@]}"; do printf '%s %s\n' "${tm[$s]:-99999}" "$s"; done | sort -rn | awk '{print $2}' > "$run/queue"
+  # How many at once: the free box slots now (+1 for dev02). Fewer leaves slots idle; more only parks extra waiters in
+  # heavy's queue ahead of other agents' jobs.
+  local gpu=${HEAVY_OFFLOAD:-} free
+  [ -n "$gpu" ] || gpu=$(sed -n 's/^OFFLOAD=//p' /etc/heavy.conf 2>/dev/null | tail -1)
+  [ -n "$gpu" ] || gpu=/home/gamedev/godot/dot-bootstrap/tools/gpu.sh
+  free=$(timeout 90 "$gpu" capacity 2>/dev/null | grep -oE '^[a-z0-9]+ +[0-9]+/' | awk '{s+=$2} END{print s+0}')
+  [[ $jobs =~ ^[0-9]+$ ]] && [ "$jobs" -gt 0 ] || jobs=$(( ${free:-0} + 1 ))
+  [ "$jobs" -lt 2 ] && jobs=2
+  [ "$jobs" -gt "${HV_SHARD_MAX:-16}" ] && jobs=${HV_SHARD_MAX:-16}
+  [ "$jobs" -gt ${#suites[@]} ] && jobs=${#suites[@]}
+  echo "hv: shard: ${#suites[@]} suite(s) over $jobs job(s) (${free:-?} free box slots now); output in $run" >&2
+  local t0; t0=$(date +%s)
+  trap 'trap - TERM INT HUP; echo "hv: shard: stopped; killing its jobs" >&2; kill $(hv_desc $$) 2>/dev/null; exit 143' TERM INT HUP
+  if [ "$all" = 1 ] && [ "$noparse" = 0 ]; then
+    ( heavy --lane check -- timeout 1800 bash -c 'GODOT=godot RED= GRN= OFF=
+        timeout 600 "$GODOT" --headless --path . --import >/dev/null 2>&1
+        eval "$(sed -n "/^PARSE_NOISE=/,/^}/p" game.sh)"
+        parse_all; f=$?; [ "$f" = 0 ] && echo "  ok   every script parses"; exit "$f"' > "$run/_parse.out" 2>&1 </dev/null
+      echo $? > "$run/_parse.rc" ) &
+  fi
+  local i
+  for i in $(seq 1 "$jobs"); do
+    (
+      while :; do
+        s=$( exec 9>>"$run/queue.lock"; flock 9; s=$(head -n 1 "$run/queue"); [ -n "$s" ] && sed -i 1d "$run/queue"; echo "$s" )
+        [ -n "$s" ] || break
+        mt=0
+        for kv in $(sed -n 's/^MIN_TIMEOUTS="\(.*\)"/\1/p' game.sh); do [ "${kv%%=*}" = "$s" ] && mt=${kv#*=}; done
+        T=$t; [ $((mt + 900)) -gt "$T" ] && T=$((mt + 900)); [ "$T" -lt 1800 ] && T=1800
+        for try in 1 2; do
+          st=$(date +%s)
+          HEAVY_JOB_MAX_MIN=$((T / 60 + 5)) heavy -- timeout "$T" ./game.sh --no-parse test "$s" > "$run/$s.out" 2>&1 </dev/null
+          rc=$?; en=$(date +%s)
+          if [ "$try" = 1 ]; then case $rc in 75|137|255)
+            mv -f "$run/$s.out" "$run/$s.out.try1"; echo "hv: shard: $s exited $rc (killed/lost); running it again" >&2; continue ;; esac; fi
+          break
+        done
+        box=$(sed -n 's/^heavy: .*(\([A-Za-z0-9_-]*\)) took this suite:.*/\1/p' "$run/$s.out" | tail -n 1); : "${box:=dev02}"
+        echo "$rc" > "$run/$s.rc"; echo "$box $((en - st)) $T" > "$run/$s.meta"
+        echo "hv: shard: $s $([ "$rc" = 0 ] && echo ok || echo "FAIL rc=$rc") on $box in $((en - st))s" >&2
+        # Only real results (pass/fail, not timeouts or kills) teach the order.
+        case $rc in 0|1) ( exec 9>>"$times.lock"; flock 9; { grep -v "^$s " "$times"; echo "$s $((en - st))"; } > "$times.new"; mv -f "$times.new" "$times" ) ;; esac
+      done
+    ) &
+    sleep 1   # stagger the first offers a little (each one rsyncs the tree)
+  done
+  wait
+  trap - TERM INT HUP
+  local t1 bad=0 sum=0 rc box dur T stats
+  t1=$(date +%s)
+  {
+    echo "== hv shard report: $PWD ($(git rev-parse --short HEAD 2>/dev/null)), ${#suites[@]} suite(s), $jobs at once"
+    if [ -f "$run/_parse.rc" ]; then
+      rc=$(cat "$run/_parse.rc"); echo "-- parse pass (dev02): $([ "$rc" = 0 ] && echo pass || echo "FAIL rc=$rc")"
+      grep -E '^  (ok|FAIL)' -A3 "$run/_parse.out" | head -n 40
+      [ "$rc" = 0 ] || { bad=1; echo "   output: $run/_parse.out"; }
+    fi
+  } > "$run/report.txt"
+  for s in "${suites[@]}"; do
+    rc=$(cat "$run/$s.rc" 2>/dev/null || echo none); box=?; dur=0; T=?
+    [ -f "$run/$s.meta" ] && read -r box dur T < "$run/$s.meta"
+    sum=$((sum + dur))
+    stats=$(sed -n "s/^gpu.sh: $box \(peak_mb=.*\)/\1/p" "$run/$s.out" 2>/dev/null | tail -n 1)
+    {
+      printf -- '-- %s: %s  box=%s %ss%s\n' "$s" "$([ "$rc" = 0 ] && echo pass || echo "FAIL rc=$rc")" "$box" "$dur" "${stats:+  ($stats)}"
+      [ "$rc" = 124 ] && echo "   timed out after ${T}s"
+      awk '/^running the suites/{on=1; next} on && /^$/{exit} on' "$run/$s.out" 2>/dev/null
+      [ "$rc" = 0 ] || echo "   output: $run/$s.out"
+    } >> "$run/report.txt"
+    [ "$rc" = 0 ] || bad=1
+  done
+  local wall=$((t1 - t0))
+  { echo "== $([ $bad = 0 ] && echo 'all passed' || echo 'SOME FAILED'): wall ${wall}s, suite time ${sum}s (x$(awk -v a=$sum -v b=$wall 'BEGIN{printf "%.1f", (b > 0) ? a / b : 0}') in parallel)"
+    echo "   report: $run/report.txt"; } >> "$run/report.txt"
+  cat "$run/report.txt"
+  exit $bad
+}
+case $mode in game|scene|import|shard) [ "${HV_NO_PREFLIGHT:-0}" = 1 ] || hv_preflight ;; esac
 # A scene in a fresh worktree (no class cache yet) cannot resolve class_name scripts: Godot prints "Failed to load
 # script" / "Parse Error" and then idles until the watchdog kills it 20 min later (43 such kills a day, 2026-11-08).
 # Import first (heavy puts --import in the check lane, so it does not wait behind the build slot). HV_NO_IMPORT=1 skips.
@@ -146,6 +255,7 @@ if [ "$mode" = scene ] && [ "${HV_NO_IMPORT:-0}" != 1 ] && [ ! -f .godot/global_
 fi
 case $mode in
   game)   exec heavy -- timeout "$t" ./game.sh "$@" ;;
+  shard)  hv_shard "$@" ;;
   scene)  exec heavy -- timeout "$t" godot --headless --path . "$@" ;;
   import) exec heavy -- timeout "$t" godot --headless --path . --import ;;
   local)  exec heavy -- "$@" ;;
