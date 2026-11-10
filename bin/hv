@@ -6,7 +6,8 @@
 #
 #   hv <worktree> game [--no-parse] test [suite...]      full or partial game suite, ONE job (suites in a row)
 #   hv <worktree> shard [--no-parse] [--jobs N] [suite...]  the same, one job per suite on all free box slots at
-#                                                         once, one merged report (use this for 2+ suites)
+#                                                         once, one merged report (use this for 2+ suites); a suite_shards
+#                                                         suite runs one job per shard, then its SUITE.merge check
 #   hv <worktree> scene res://examples/x.tscn [-- args]  one headless scene
 #   hv <worktree> import                                  godot --headless --import (local: not offerable)
 #   hv <worktree> local <command...>                      anything else, local lane (use rarely)
@@ -184,7 +185,26 @@ hv_shard() {
     -*) echo "hv: shard: unknown option $1 (suite args after -- are not supported: use hv game for those)" >&2; exit 2 ;;
     *) suites+=("${1%.tscn}"); shift ;;
   esac; done
-  if [ ${#suites[@]} -eq 0 ]; then all=1; mapfile -t suites < <(./game.sh suites 2>/dev/null); fi
+  # suite_shards (dot-game-template): `./game.sh suites --shards` lists SUITE.SHARD for a sharded suite (an older game.sh
+  # ignores the flag and lists the suites). A sharded suite runs as one job per shard and then `test SUITE.merge` over
+  # the logs the shards' jobs copied back (a local check-lane job: offload does not ship .godot/test-logs).
+  local units=() merges=() r u found
+  mapfile -t units < <(./game.sh suites --shards 2>/dev/null)
+  if [ ${#suites[@]} -eq 0 ]; then
+    all=1; suites=("${units[@]}")
+    for u in "${units[@]}"; do [[ $u == *.* ]] && [[ " ${merges[*]-} " != *" ${u%%.*} "* ]] && merges+=("${u%%.*}"); done
+  else
+    local want=()
+    for r in "${suites[@]}"; do
+      found=0
+      for u in "${units[@]}"; do
+        if [ "$u" = "$r" ]; then want+=("$u"); found=1
+        elif [[ $u == "$r".* ]]; then want+=("$u"); found=1; [[ " ${merges[*]-} " != *" $r "* ]] && merges+=("$r"); fi
+      done
+      [ "$found" = 1 ] || want+=("$r")
+    done
+    suites=("${want[@]}")
+  fi
   [ ${#suites[@]} -gt 0 ] || { echo "hv: shard: no suites (./game.sh suites printed none)" >&2; exit 2; }
   for s in "${suites[@]}"; do [[ $s =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]*$ ]] || { echo "hv: shard: bad suite name $s" >&2; exit 2; }; done
   local repo common
@@ -222,7 +242,7 @@ hv_shard() {
         s=$( exec 9>>"$run/queue.lock"; flock 9; s=$(head -n 1 "$run/queue"); [ -n "$s" ] && sed -i 1d "$run/queue"; echo "$s" )
         [ -n "$s" ] || break
         mt=0
-        for kv in $(sed -n 's/^MIN_TIMEOUTS="\(.*\)"/\1/p' game.sh); do [ "${kv%%=*}" = "$s" ] && mt=${kv#*=}; done
+        for kv in $(sed -n 's/^MIN_TIMEOUTS="\(.*\)"/\1/p' game.sh); do [ "${kv%%=*}" = "${s%%.*}" ] && mt=${kv#*=}; done
         T=$t; [ $((mt + 900)) -gt "$T" ] && T=$((mt + 900)); [ "$T" -lt 1800 ] && T=1800
         for try in 1 2; do
           st=$(date +%s)
@@ -243,7 +263,17 @@ hv_shard() {
   done
   wait
   trap - TERM INT HUP
-  local t1 bad=0 sum=0 rc box dur T stats
+  local t1 bad=0 sum=0 rc box dur T stats m mbad
+  # The merge of each sharded suite, once all its shards passed (it holds the whole-run checks; seconds, run here).
+  for m in "${merges[@]}"; do
+    mbad=0
+    for u in "${suites[@]}"; do [[ $u == "$m".* ]] && [ "$(cat "$run/$u.rc" 2>/dev/null)" != 0 ] && mbad=1; done
+    if [ "$mbad" = 1 ]; then echo none > "$run/$m.merge.rc"; echo "- 0 0" > "$run/$m.merge.meta"; continue; fi
+    st=$(date +%s)
+    heavy --lane check -- timeout 900 bash -c './game.sh --no-parse test "$0"' "$m.merge" > "$run/$m.merge.out" 2>&1 </dev/null; rc=$?
+    echo "$rc" > "$run/$m.merge.rc"; echo "dev02 $(( $(date +%s) - st )) 900" > "$run/$m.merge.meta"
+    echo "hv: shard: $m.merge $([ "$rc" = 0 ] && echo ok || echo "FAIL rc=$rc")" >&2
+  done
   t1=$(date +%s)
   {
     echo "== hv shard report: $PWD ($(git rev-parse --short HEAD 2>/dev/null)), ${#suites[@]} suite(s), $jobs at once"
@@ -253,7 +283,9 @@ hv_shard() {
       [ "$rc" = 0 ] || { bad=1; echo "   output: $run/_parse.out"; }
     fi
   } > "$run/report.txt"
-  for s in "${suites[@]}"; do
+  local reportable=("${suites[@]}")
+  for m in "${merges[@]}"; do reportable+=("$m.merge"); done
+  for s in "${reportable[@]}"; do
     rc=$(cat "$run/$s.rc" 2>/dev/null || echo none); box=?; dur=0; T=?
     [ -f "$run/$s.meta" ] && read -r box dur T < "$run/$s.meta"
     sum=$((sum + dur))
