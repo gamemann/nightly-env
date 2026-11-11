@@ -132,7 +132,14 @@ if [ "$lane" = build ]; then
   case " $* " in *" --check-only "*|*" --import "*) lane=check ;; esac
 fi
 
+# 2026-11-11: a perf bench (tools/perf_bench.sh) runs on a remote GPU box and sits idle here for up to 90 min; in the
+# build lane it held dev02's only local slot and blocked every local-only job behind it. Own lane, own locks.
+if [ "$lane" = build ]; then
+  case " $* " in *" tools/perf_bench.sh "*) lane=perf ;; esac
+fi
+
 case $lane in
+  perf) slots=${HEAVY_SLOTS_PERF:-2} ;;
   build) slots=$SLOTS_build ;;
   check) slots=$SLOTS_check ;;
   *) echo "heavy: unknown lane '$lane' (build or check)" >&2; exit 64 ;;
@@ -284,7 +291,7 @@ fi
 oom_before=$(journalctl --user -q -o cat -u "$unit.scope" 2>/dev/null | grep -c 'oom' || true)
 # Wall-clock ceiling: a 7000 s exploration run held both dev02 build slots for over an hour
 # (2026-11-02). Raise per job with HEAVY_JOB_MAX_MIN=N, 0 disables.
-MAX_MIN=${HEAVY_JOB_MAX_MIN:-45}
+MAX_MIN=${HEAVY_JOB_MAX_MIN:-$([ "$lane" = perf ] && echo 100 || echo 45)}
 cap=(); [ "$MAX_MIN" != 0 ] && cap=(timeout -k 15 "$(( MAX_MIN * 60 ))")
 [ -n "$lfd" ] || exec {lfd}>/dev/null
 # A compiler's default heap is ~2 GB, so a bare run aborts long before the ceiling: unless the

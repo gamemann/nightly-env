@@ -67,6 +67,10 @@ if [ "$1" = baseline ]; then
 fi
 wt=$1; mode=$2; shift 2
 cd "$wt" || { echo "hv: no such worktree $wt" >&2; exit 2; }
+# 2026-11-11 (nightly zz-ph-stores-link-1): a worktree made by another user (christian) is not writable by gamedev, so the
+# pre-flight "mkdir .stores" and godot "mkdir .godot" failed with Permission denied. Open it up once (other users' ~/wt
+# dirs are 777 already); chmod does not follow symlinks, .git (a file in worktrees) is left alone.
+if [ ! -w . ] && [ "$mode" != baseline ]; then sudo -n chmod -R a+rwX . 2>/dev/null || echo "hv: WARNING $PWD is not writable by $(id -un) and chmod failed" >&2; fi
 [ -f project.godot ] || [ "$mode" = local ] || { echo "hv: $wt has no project.godot (only 'hv <dir> local ...' works for non-Godot repos)" >&2; exit 2; }
 export PATH=/home/gamedev/.cargo/bin:/home/gamedev/.local/bin:$PATH   # cargo for hv local (non-login shells lack it)
 # 2026-11-11 (nightly 1723): gpu.sh offers only a PWD directly under gamedev's WT_ROOT (/home/gamedev/wt) or ~/godot. Worktrees
@@ -87,8 +91,8 @@ case "$PWD" in
 esac
 unset GODOT GPU_OFFLOAD
 # 2026-11-08: dev02 (47GB, swapping) ran 5 suites locally and never queued, so PH (40c, mostly idle) and staging got no offers.
-# Only 1 local build slot for hv jobs; the rest wait and are offered to PH/staging02/staging every 15 s. HEAVY_SLOTS_BUILD in env overrides.
-export HEAVY_SLOTS_BUILD=${HEAVY_SLOTS_BUILD:-1}
+# 2026-11-11: 2 local build slots (was 1: a 90 min job starved all local-only jobs). Only 2 local build slots for hv jobs; the rest wait and are offered to PH/staging02/staging every 15 s. HEAVY_SLOTS_BUILD in env overrides.
+export HEAVY_SLOTS_BUILD=${HEAVY_SLOTS_BUILD:-2}
 t=${HV_TIMEOUT:-2400}
 
 # Pre-flight (2026-11-07, v2 same day): a fresh/zombie worktree has only tracked files. It links what the project needs
@@ -127,6 +131,7 @@ hv_preflight() {
   i=0
   while [ $i -lt ${#queue[@]} ]; do
     n=${queue[$i]}; i=$((i+1))
+    [ -z "$n" ] && continue
     [ -n "${seen[$n]:-}" ] && continue; seen[$n]=1
     if [ ! -e "addons/$n" ]; then
       if t=$(hv_resolve "$n"); then
@@ -283,10 +288,13 @@ hv_shard() {
   local t0; t0=$(date +%s)
   trap 'trap - TERM INT HUP; echo "hv: shard: stopped; killing its jobs" >&2; kill $(hv_desc $$) 2>/dev/null; exit 143' TERM INT HUP
   if [ "$all" = 1 ] && [ "$noparse" = 0 ]; then
-    ( heavy --lane check -- timeout 1800 bash -c 'GODOT=godot RED= GRN= OFF=
-        timeout 600 "$GODOT" --headless --path . --import >/dev/null 2>&1
+    # 2026-11-11: build lane, so gpu.sh route/offer can hand it to a box (kind=parse: the box imports, then runs game.sh's parse_all;
+    # the trailing hv-parse-pass word is what gpu.sh recognises, it runs its own snippet there). The " --import " word is spelled via $IMP
+    # because heavy puts any command with that word in the check lane, which is never offered to a box. Run here, it is this snippet.
+    ( heavy -- timeout 1800 bash -c 'GODOT=godot RED= GRN= OFF= IMP=--import
+        timeout 600 "$GODOT" --headless --path . $IMP >/dev/null 2>&1
         eval "$(sed -n "/^PARSE_NOISE=/,/^}/p" game.sh)"
-        parse_all; f=$?; [ "$f" = 0 ] && echo "  ok   every script parses"; exit "$f"' > "$run/_parse.out" 2>&1 </dev/null
+        parse_all; f=$?; [ "$f" = 0 ] && echo "  ok   every script parses"; exit "$f"' hv-parse-pass > "$run/_parse.out" 2>&1 </dev/null
       echo $? > "$run/_parse.rc" ) &
   fi
   local i
@@ -332,7 +340,7 @@ hv_shard() {
   {
     echo "== hv shard report: $PWD ($(git rev-parse --short HEAD 2>/dev/null)), ${#suites[@]} suite(s), $jobs at once"
     if [ -f "$run/_parse.rc" ]; then
-      rc=$(cat "$run/_parse.rc"); echo "-- parse pass (dev02): $([ "$rc" = 0 ] && echo pass || echo "FAIL rc=$rc")"
+      rc=$(cat "$run/_parse.rc"); echo "-- parse pass: $([ "$rc" = 0 ] && echo pass || echo "FAIL rc=$rc")"
       grep -E '^  (ok|FAIL)' -A3 "$run/_parse.out" | head -n 40
       [ "$rc" = 0 ] || { bad=1; echo "   output: $run/_parse.out"; "$(dirname "$(readlink -f "$0")")/addon-fresh" "$PWD"; }
     fi
@@ -358,7 +366,7 @@ hv_shard() {
   cat "$run/report.txt"
   exit $bad
 }
-case $mode in game|scene|import|shard) [ "${HV_NO_PREFLIGHT:-0}" = 1 ] || hv_preflight ;; esac
+case $mode in game|scene|import|shard|local) [ "${HV_NO_PREFLIGHT:-0}" = 1 ] || hv_preflight ;; esac
 # A scene in a fresh worktree (no class cache yet) cannot resolve class_name scripts: Godot prints "Failed to load
 # script" / "Parse Error" and then idles until the watchdog kills it 20 min later (43 such kills a day, 2026-11-08).
 # Import first (heavy puts --import in the check lane, so it does not wait behind the build slot). HV_NO_IMPORT=1 skips.
@@ -371,6 +379,7 @@ case $mode in
   shard)  hv_shard "$@" ;;
   scene)  hv_guard heavy -- timeout "$t" godot --headless --path . "$@"; exit $? ;;
   import) exec heavy -- timeout "$t" godot --headless --path . --import ;;
+  # local: tools/*.sh check/selftest/regen/convert jobs are offered to PH by heavy -> gpu.sh (2026-11-11), else run here
   local)  exec heavy -- "$@" ;;
   *) echo "hv: unknown mode $mode" >&2; exit 2 ;;
 esac

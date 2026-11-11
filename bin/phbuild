@@ -29,6 +29,12 @@ if ! ssh $H "test -d /home/core/pb/_nm/$hash/node_modules"; then
   rsync -a --rsync-path="$RS" "$wt/package-lock.json" "$H:/home/core/pb/_nm/$hash/" || exit 1
 fi
 q=$(printf '%q ' "$@")
+# PH has node 20, whose `node --test` does not expand globs (added in 21): `npm test` found no "src/**/*.test.ts".
+# Run the package.json test script with its quoted globs replaced by a find list.
+case "$*" in "npm test"|"npm run test")
+  # shell-quoted: the remote bash re-reads $q as one command line
+  q="node --import tsx --import ./scripts/sprite-test-loader.mjs --test \$(find src -name '*.test.ts' | sort)" ;;
+esac
 exec ssh $H "${SU:+$SU }bash -s" <<EOF
 set -e
 cd ~/pb/$name
