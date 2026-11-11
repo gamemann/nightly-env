@@ -88,6 +88,7 @@ t=${HV_TIMEOUT:-2400}
 #   * transitively: each linked addon's source repo has its own addons/ links (dot-cloud -> dot_core ...): same rule
 #   * '# bootstrap-link: <src>' content entries (any repo with a .gitignore; game.sh is NOT required: library repos
 #     such as dot-map / dot-player-char / dot-radio have none, which is why v1 skipped them), plus an empty .stores
+#   * dot-server-deploy only: games/<name> and addons/<name> links and client/auth.json from the main checkout (2026-11-11, see below)
 # Fails HERE (exit 3) if a hard need cannot be resolved. HV_NO_PREFLIGHT=1 skips it. Repos with no project.godot
 # (dot-map-convert is Python) only support `hv <dir> local ...`.
 hv_resolve() { # addon name -> prints source dir
@@ -133,6 +134,45 @@ hv_preflight() {
     elif [ -e "/home/gamedev/godot/$src" ]; then ln -sfn "/home/gamedev/godot/$src" "$path" && echo "hv: linked $path -> ~/godot/$src" >&2
     else missing="$missing $path(from $src)"; fi
   done < <(awk '/^# bootstrap-link: /{src=$3; next} src!="" && /^\//{print $0 "\t" src} {src=""}' .gitignore)
+  # dot-server-deploy worktrees (2026-11-11): games/, addons/ and client/auth.json are gitignored, so a fresh worktree has
+  # none of them and examples/solo_check.tscn fails to parse (no DotAuthClient, TmcSolo ...). All are linked from the MAIN
+  # checkout, never overwritten (addons/ entries there are real copies, not links, so the addon rule above does not see them):
+  #   * games/<name>: each entry of the main checkout's games/ (a link to a sibling checkout ~/godot/<name>, and the
+  #     games/.gdignore), linked to the same absolute target. gpu.sh relinks a whole-repo link to the box's staged sibling.
+  #   * addons/<name>: each entry of the main checkout's addons/, linked to the same absolute target (the same code the
+  #     main checkout runs; a game job already rsyncs the main tree, so nothing new reaches the box).
+  #   * client/auth.json: the main checkout's file. It holds only backbone_url (the site origin, no credential), and a game
+  #     job already rsyncs the main checkout's tree with --copy-links, so the box gets the same bytes it always did. Tool jobs
+  #     list `git ls-files -co --exclude-standard`, which still omits it (gitignored).
+  # Only targets outside ~/wt are linked: another worktree's private files are never shared. Undo: rm the symlinks.
+  if [ -n "$main" ] && [ "$(basename "$main")" = dot-server-deploy ]; then
+    dsd_ok() { case $1 in "$HOME"/wt/*|/home/gamedev/wt/*) return 1 ;; esac; [ -n "$1" ] && [ -e "$1" ]; }
+    if [ -d "$main/games" ]; then
+      for g in "$main"/games/* "$main"/games/.gdignore; do
+        n=${g##*/}
+        { [ -e "$g" ] || [ -L "$g" ]; } || continue
+        { [ -e "games/$n" ] || [ -L "games/$n" ]; } && continue
+        t=$(readlink -f "$g") || continue
+        if dsd_ok "$t"; then mkdir -p games && ln -s "$t" "games/$n" && echo "hv: linked games/$n -> $t" >&2
+        else echo "hv: not linking games/$n: $t is missing or in ~/wt (another worktree's): not linked" >&2; fi
+      done
+    fi
+    if [ -d "$main/addons" ]; then
+      for a in "$main"/addons/*; do
+        n=${a##*/}
+        { [ -e "$a" ] || [ -L "$a" ]; } || continue
+        { [ -e "addons/$n" ] || [ -L "addons/$n" ]; } && continue
+        t=$(readlink -f "$a") || continue
+        if dsd_ok "$t"; then mkdir -p addons && ln -s "$t" "addons/$n" && echo "hv: linked addons/$n -> $t" >&2
+        else echo "hv: not linking addons/$n: $t is missing or in ~/wt (another worktree's): not linked" >&2; fi
+      done
+    fi
+    if [ ! -e client/auth.json ] && [ ! -L client/auth.json ] && [ -f "$main/client/auth.json" ]; then
+      t=$(readlink -f "$main/client/auth.json")
+      if dsd_ok "$t"; then mkdir -p client && ln -s "$t" client/auth.json && echo "hv: linked client/auth.json -> $t" >&2
+      else echo "hv: not linking client/auth.json: $t is missing or in ~/wt (another worktree's): not linked" >&2; fi
+    fi
+  fi
   if [ -n "$missing" ]; then
     echo "hv: PRE-FLIGHT FAILED in $PWD: cannot resolve:$missing" >&2
     echo "hv: fix: tools/link_worktree.sh <main checkout> (if the repo has it) or link them by hand; nothing was submitted." >&2
