@@ -1,0 +1,62 @@
+{
+  "game-arena": {
+    "ip": "10.50.0.3",
+    "port": 6100
+  },
+  "game-zombie-zone": {
+    "ip": "10.50.0.3",
+    "port": 6102
+  },
+  "game-playground": {
+    "ip": "10.50.0.3",
+    "port": 6104
+  },
+  "multi": {
+    "ip": "10.50.0.3",
+    "port": 6128
+  },
+  "game-g2gfast": {
+    "ip": "10.50.0.4",
+    "port": 6106
+  },
+  "game-hungario": {
+    "ip": "10.50.0.4",
+    "port": 6108
+  },
+  "game-hide-n-seek": {
+    "ip": "10.50.0.4",
+    "port": 6110
+  },
+  "game-murder-mystery": {
+    "ip": "10.50.0.4",
+    "port": 6112
+  },
+  "mg-smash-copter": {
+    "ip": "10.50.0.5",
+    "port": 6114
+  },
+  "mg-buses-from-hell": {
+    "ip": "10.50.0.5",
+    "port": 6116
+  },
+  "mg-wipeout": {
+    "ip": "10.50.0.5",
+    "port": 6118
+  },
+  "mg-deathrun": {
+    "ip": "10.50.0.5",
+    "port": 6120
+  },
+  "mg-dangerous-delivery": {
+    "ip": "10.50.0.6",
+    "port": 6122
+  },
+  "mg-look-at-me": {
+    "ip": "10.50.0.6",
+    "port": 6124
+  },
+  "mg-prop-hunt": {
+    "ip": "10.50.0.6",
+    "port": 6126
+  }
+}
