@@ -76,6 +76,7 @@ case "$(pwd -P)" in
   /home/*/wt/*/*|/home/gamedev/wt/*) ;;
   /home/*/wt/*)
     real=$(pwd -P); lnk=/home/gamedev/wt/$(basename "$real")
+    [ -L "$lnk" ] && [ ! -e "$lnk" ] && rm -f "$lnk"   # dangling: its worktree was removed
     if [ -L "$lnk" ] && [ "$(readlink "$lnk")" = "$real" ]; then :
     elif [ ! -e "$lnk" ] && [ ! -L "$lnk" ]; then ln -s "$real" "$lnk" || lnk=
     else echo "hv: WARNING $lnk already exists and is not a link to $real: not offerable to the boxes; move the worktree to /home/gamedev/wt or rename it" >&2; lnk=; fi
