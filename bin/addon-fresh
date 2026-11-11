@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# addon-fresh [game-dir]  (default: cwd). Stale-addon guard (nightly addon-checkouts-stale-guard-1).
+# A game's addons/<x> are symlinks into shared checkouts (dot-*, arena-*). A checkout behind its origin/main makes the game's
+# parse pass fail although the game is right (2026-11-11: dot-core 3 behind). Call this after a parse failure: for each distinct
+# linked checkout it fetches origin (20s cap) and prints a WARN line when HEAD is behind origin/main, with the ff command.
+# Warn only, never pulls. Dirty or diverged checkouts get a WARN that says to leave them alone. Always exits 0.
+d=${1:-.}; [ -d "$d/addons" ] || exit 0
+self=$(git -C "$d" rev-parse --show-toplevel 2>/dev/null)
+declare -A seen
+for l in "$d"/addons/*; do
+  [ -L "$l" ] || continue
+  t=$(readlink -f "$l") || continue
+  r=$(git -C "$t" rev-parse --show-toplevel 2>/dev/null) || continue
+  [ -n "${seen[$r]:-}" ] && continue; seen[$r]=1
+  [ "$r" = "$self" ] && continue
+  timeout 20 git -C "$r" fetch -q origin 2>/dev/null
+  git -C "$r" rev-parse -q --verify origin/main >/dev/null || continue
+  read -r ahead behind < <(git -C "$r" rev-list --left-right --count HEAD...origin/main 2>/dev/null)
+  [ "${behind:-0}" -gt 0 ] || continue
+  dirty=$(git -C "$r" status --porcelain -uno 2>/dev/null | wc -l)
+  if [ "$ahead" -gt 0 ]; then
+    echo "addon-fresh: WARN $r is $behind behind and $ahead ahead of origin/main (diverged): do NOT pull, ask its owner"
+  elif [ "$dirty" -gt 0 ]; then
+    echo "addon-fresh: WARN $r is $behind behind origin/main but has $dirty uncommitted change(s): do NOT pull, ask its owner"
+  else
+    echo "addon-fresh: WARN $r is $behind behind origin/main (a stale checkout can break this game's parse): sudo -n -u gamedev git -C $r pull --ff-only"
+  fi
+done
+exit 0

@@ -222,7 +222,8 @@ hv_guard() {
     kill -TERM -- "-$pid" $(hv_desc "$pid") 2>/dev/null; sleep 3; kill -KILL -- "-$pid" $(hv_desc "$pid") 2>/dev/null
     { echo "hv: BROKEN SCRIPT: the job logged a script parse/compile error and made no progress for ${q}s; killed it (exit 66)."
       echo "hv: first error line: ${hit:0:300}"
-      echo "hv: fix the script (parse check: ./game.sh parse, or godot --headless --import) and run again."; } | tee -a "$tmp"
+      echo "hv: fix the script (parse check: ./game.sh parse, or godot --headless --import) and run again."
+      "$(dirname "$(readlink -f "$0")")/addon-fresh" "$PWD"; } | tee -a "$tmp"
     kill "$tpid" 2>/dev/null; rm -f "$tmp"; return 66
   done
   wait "$pid"; rc=$?
@@ -333,7 +334,7 @@ hv_shard() {
     if [ -f "$run/_parse.rc" ]; then
       rc=$(cat "$run/_parse.rc"); echo "-- parse pass (dev02): $([ "$rc" = 0 ] && echo pass || echo "FAIL rc=$rc")"
       grep -E '^  (ok|FAIL)' -A3 "$run/_parse.out" | head -n 40
-      [ "$rc" = 0 ] || { bad=1; echo "   output: $run/_parse.out"; }
+      [ "$rc" = 0 ] || { bad=1; echo "   output: $run/_parse.out"; "$(dirname "$(readlink -f "$0")")/addon-fresh" "$PWD"; }
     fi
   } > "$run/report.txt"
   local reportable=("${suites[@]}")
