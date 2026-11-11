@@ -69,6 +69,18 @@ wt=$1; mode=$2; shift 2
 cd "$wt" || { echo "hv: no such worktree $wt" >&2; exit 2; }
 [ -f project.godot ] || [ "$mode" = local ] || { echo "hv: $wt has no project.godot (only 'hv <dir> local ...' works for non-Godot repos)" >&2; exit 2; }
 export PATH=/home/gamedev/.cargo/bin:/home/gamedev/.local/bin:$PATH   # cargo for hv local (non-login shells lack it)
+# 2026-11-11 (nightly 1723): gpu.sh offers only a PWD directly under gamedev's WT_ROOT (/home/gamedev/wt) or ~/godot. Worktrees
+# in another user's ~/wt (~/CLAUDE.md tells agents /home/christian/wt/<name>) never offloaded. Fix: enter them through a symlink
+# /home/gamedev/wt/<name> -> the real dir (logical PWD, so gpu.sh sees the eligible path and rsyncs it to the box). Cleaned by prune.
+case "$(pwd -P)" in
+  /home/*/wt/*/*|/home/gamedev/wt/*) ;;
+  /home/*/wt/*)
+    real=$(pwd -P); lnk=/home/gamedev/wt/$(basename "$real")
+    if [ -L "$lnk" ] && [ "$(readlink "$lnk")" = "$real" ]; then :
+    elif [ ! -e "$lnk" ] && [ ! -L "$lnk" ]; then ln -s "$real" "$lnk" || lnk=
+    else echo "hv: WARNING $lnk already exists and is not a link to $real: not offerable to the boxes; move the worktree to /home/gamedev/wt or rename it" >&2; lnk=; fi
+    [ -n "$lnk" ] && cd "$lnk" ;;
+esac
 case "$PWD" in
   /home/gamedev/wt/*/*) echo "hv: WARNING $PWD is nested: not offerable to the boxes (needs ~/wt/<name> directly)" >&2 ;;
 esac
