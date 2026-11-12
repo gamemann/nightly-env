@@ -11,6 +11,7 @@
 #        (nothing unpushed)
 #      - HEAD is an ancestor of origin/main (or origin/master), i.e. merged. Refs are not fetched;
 #        a stale origin/main only keeps more worktrees, never removes more.
+#      - no symlink under a checkout's or worktree's addons/ resolves into it (a game's addons/dot_game link)
 #    Branches are not deleted.
 # 2. Dangling links in /home/gamedev/wt are swept by godot/prune-wt-links.sh (nightly 1737),
 #    run as gamedev because that directory belongs to gamedev.
@@ -29,6 +30,21 @@ esac
 
 removed=0; kept=0
 
+# Symlink targets (nightly prune-sh-removes-1): a game's addons/dot_game may link into a worktree of
+# another repo, and removing that worktree leaves the game with a dangling addon. Collect every
+# symlink target under the addons dirs of the checkouts and worktrees once; a worktree that is, or
+# contains, one of those targets is kept.
+LINK_ROOTS=${PRUNE_LINK_ROOTS:-"$HOME/wt /home/gamedev/wt /home/gamedev/godot"}
+link_targets=$(
+  for r in $LINK_ROOTS; do
+    [ -d "$r" ] || continue
+    find "$r" -maxdepth 4 -type l -path '*/addons/*' -print0 2>/dev/null
+  done | xargs -0 -r -n1 readlink -f 2>/dev/null | sort -u
+)
+is_link_target() {  # is_link_target <worktree dir>: 0 when some link resolves into it
+  printf '%s\n' "$link_targets" | awk -v d="$(readlink -f "$1")" 'index($0, d "/") == 1 || $0 == d { f = 1 } END { exit !f }'
+}
+
 [ -d "$WT" ] || { echo "prune: no directory $WT" >&2; exit 2; }
 
 for d in "$WT"/*/; do
@@ -36,6 +52,8 @@ for d in "$WT"/*/; do
   [ -L "$d" ] && continue            # links (e.g. arena-surf-dm-maps) are not worktrees
   [ -f "$d/.git" ] || continue       # only linked worktrees have a .git file
   name=${d##*/}
+
+  if is_link_target "$d"; then echo "keep $name: a symlink under some addons/ points into it"; kept=$((kept+1)); continue; fi
 
   common=$(git -C "$d" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || continue
   base=""
