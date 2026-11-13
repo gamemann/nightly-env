@@ -9,13 +9,14 @@
 #                                                         once, one merged report (use this for 2+ suites); a suite_shards
 #                                                         suite runs one job per shard, then its SUITE.merge check
 #   hv <worktree> scene res://examples/x.tscn [-- args]  one headless scene
-#   hv <worktree> import                                  godot --headless --import (local: not offerable)
+#   hv <worktree> import                                  not needed: game/shard/scene import where they run; a no-op
+#                                                         while offload is on (HV_IMPORT_LOCAL=1: import here, check lane)
 #   hv <worktree> local <command...>                      anything else, local lane (use rarely)
 #   hv baseline <repo> [suite...]                         suites on origin/main, cached per commit (no suite = all)
 # HV_TIMEOUT seconds (default 2400). Output goes to stdout/stderr: redirect it yourself (`> log 2>&1`).
 # Run as the work user:  sudo -u gamedev /home/gamedev/bin/hv <worktree> ...
 set -u
-[ $# -ge 2 ] || { sed -n '2,15p' "$0"; exit 2; }
+[ $# -ge 2 ] || { sed -n '2,16p' "$0"; exit 2; }
 
 # hv baseline (2026-11-08): agents made their own *base* worktrees and ran the same suites on the same main commit
 # again and again (4 worktrees at one commit; two headless_bots baselines at once on PH). This runs each suite once per
@@ -369,10 +370,21 @@ hv_shard() {
 case $mode in game|scene|import|shard|local) [ "${HV_NO_PREFLIGHT:-0}" = 1 ] || hv_preflight ;; esac
 # A scene in a fresh worktree (no class cache yet) cannot resolve class_name scripts: Godot prints "Failed to load
 # script" / "Parse Error" and then idles until the watchdog kills it 20 min later (43 such kills a day, 2026-11-08).
-# Import first (heavy puts --import in the check lane, so it does not wait behind the build slot). HV_NO_IMPORT=1 skips.
-if [ "$mode" = scene ] && [ "${HV_NO_IMPORT:-0}" != 1 ] && [ ! -f .godot/global_script_class_cache.cfg ]; then
-  echo "hv: $PWD has no .godot/global_script_class_cache.cfg (fresh worktree): importing before the scene" >&2
-  heavy -- timeout 1800 godot --headless --path . --import </dev/null >&2 || echo "hv: WARNING the import exited $?; running the scene anyway" >&2
+# 2026-11-13: hv no longer imports here first. That separate local `heavy -- godot --import` ran for every fresh worktree
+# even when a box took the scene (gpu.sh imports on the box), and imports were 10 of 21 waiters in dev02's queue. Now the
+# job imports where it runs: a box imports itself, and heavy imports in the job's own slot when a never-imported project
+# runs a headless godot here (dot-bootstrap tools/heavy, HEAVY_NO_PREIMPORT=1 skips that).
+# hv import: with an offload box configured, every later hv game/shard/scene run imports where it runs, so a local import
+# only queues on dev02 for nothing. It is skipped then; HV_IMPORT_LOCAL=1 runs it here (a local tool that reads .godot).
+hv_offload_on() {
+  local gpu=${HEAVY_OFFLOAD:-}
+  [ -n "$gpu" ] || gpu=$(sed -n 's/^OFFLOAD=//p' /etc/heavy.conf 2>/dev/null | tail -1)
+  [ -n "$gpu" ] || gpu=/home/gamedev/godot/dot-bootstrap/tools/gpu.sh
+  [ -x "$gpu" ]
+}
+if [ "$mode" = import ] && [ "${HV_IMPORT_LOCAL:-0}" != 1 ] && hv_offload_on; then
+  echo "hv: import skipped: hv game/shard/scene import where they run (the box, or heavy's slot here), so no separate import is needed. HV_IMPORT_LOCAL=1 hv $PWD import imports here for a local tool that needs .godot." >&2
+  exit 0
 fi
 case $mode in
   game)   hv_guard heavy -- timeout "$t" ./game.sh "$@"; exit $? ;;
