@@ -2,15 +2,16 @@ Scripts that run my game-development fleet: a handful of Claude Code agents that
 
 ## Environment
 
-The machines are virtual machines and a laptop in my homelab. The hardware, hypervisor and networking are documented in my [homelab repo](https://github.com/gamemann/my-home-lab).
+Two virtual machines and two GPU machines in my homelab.
 
-| Role | What it is | Specs | Used for |
+| Role | Machine | Specs | Used for |
 |---|---|---|---|
-| Development VM | The main box. Agents edit code, run git and orchestrate everything from here. | 20 vCPUs, about 40 GB RAM, 3 TB NVMe, Debian 13, no GPU | Editing, quick tests, the nightly board, git pushes |
-| Build and test VM | A larger VM on a Dell Precision tower with 128 GB of RAM. It never hosts development. | 40 vCPUs, 112 GB RAM, 320 GB disk, Debian 13, no GPU | Godot test suites, Rust and TypeScript builds, Playwright, headless benchmarks |
-| Windowed GPU machines | Laptop and staging boxes with a real GPU and a display. | Laptop-class GPU | Windowed performance benchmarks, screenshots and video capture |
+| Development VM | VM on **Xtreme** (Proxmox, Intel i7-13700K, 64 GB DDR4, 4 TB NVMe) | 20 vCPUs, about 40 GB RAM, 3 TB NVMe, Debian 13, no GPU | Agents edit code, run git and orchestrate everything from here; quick tests, the nightly board |
+| Build and test VM | VM on **Powerhorse** (Dell Precision Tower 7810, 2x Xeon E5-2670 v3, 128 GB DDR4, Proxmox) | 40 vCPUs, 112 GB RAM, 320 GB disk, Debian 13, no GPU | Godot test suites, Rust and TypeScript builds, Playwright, headless benchmarks |
+| GPU desktop | **SpyKids**, a desktop | Intel i7-8700K, RTX 2070, 32 GB DDR4, 2 TB SATA SSD (Debian 13) | Windowed performance benchmarks, screenshots, video capture |
+| GPU laptop | **Staging01**, an ASUS TUF Gaming A17 | AMD Ryzen 7 4800H (8c/16t), GTX 1660 Ti, 16 GB DDR4, 1 TB NVMe (Linux Mint) | Windowed benchmarks and captures, shared with me while I use it |
 
-The development VM is the one the agents live on. Anything heavy (suites, builds, imports) is pushed to the build VM by `hv`, so the development VM stays responsive. Windowed work goes to the GPU machines, because headless Godot cannot measure rendering or audio.
+The full hardware list, hypervisors and networking are in my [homelab repo](https://github.com/gamemann/my-home-lab). The development VM is where the agents live. Anything heavy (suites, builds, imports) is pushed to the build VM by `hv`, so the development VM stays responsive. Windowed work goes to the GPU machines, because headless Godot cannot measure rendering or audio.
 
 Specs are approximate and change as I move things around. The scripts never hardcode hostnames; see [Where private values live](#where-private-values-live).
 
