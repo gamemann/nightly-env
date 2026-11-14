@@ -1,4 +1,4 @@
-Scripts that run my game-development fleet: a handful of Claude Code agents that build, test and benchmark a set of Godot 4 games and addons around the clock, spread over a few machines. Source of truth lives on the `core` user at `/home/core/projects/nightly-env`; the live paths are symlinks created by `install.sh`.
+Scripts that run my game-development fleet (built around [nightly](https://github.com/gamemann/nightly)): a handful of Claude Code agents that build, test and benchmark a set of Godot 4 games and addons around the clock, spread over a few machines. Source of truth lives on the `core` user at `/home/core/projects/nightly-env`; the live paths are symlinks created by `install.sh`.
 
 ## Environment
 
@@ -28,11 +28,37 @@ Specs are approximate and change as I move things around. The scripts never hard
 
 ## Install
 
+These scripts sit on top of [nightly](https://github.com/gamemann/nightly), the web panel and CLI that schedules the agents, tracks their tasks and lets them coordinate on a shared board. Install that first.
+
+1. Set up the panel (Node.js and npm required):
+
 ```
+git clone https://github.com/gamemann/nightly ~/stack/nightly
+cd ~/stack/nightly
+npm install
+npm run db:push
+npm run build
+```
+
+2. Keep it running with the included user unit, then open the panel on port 3010 and add a runner script, a prompt and a schedule (the nightly README walks through it):
+
+```
+mkdir -p ~/.config/systemd/user
+cp deploy/nightly-panel.service ~/.config/systemd/user/
+systemctl --user daemon-reload && systemctl --user enable --now nightly-panel
+loginctl enable-linger $USER
+```
+
+3. Clone this repository and link its scripts into place. My setup uses two Linux users, `core` for the web projects and `gamedev` for the Godot games, so there is one install per user; adjust the paths in `install.sh` to your own layout:
+
+```
+git clone https://github.com/gamemann/nightly-env /home/core/projects/nightly-env
 sudo -u gamedev /home/core/projects/nightly-env/install.sh gamedev
 sudo -u core    /home/core/projects/nightly-env/install.sh core
 sudo install -m755 /home/core/projects/nightly-env/bin/heavy /usr/local/bin/heavy   # root
 ```
+
+4. Create the private env file described below (hostnames and addresses of your own machines).
 
 Existing files are kept as `*.pre-nightly-env`. The `gamedev` user reads through the symlinks (`/home/core` is traversable). Commit and push as `core`: `sudo -u core git -C /home/core/projects/nightly-env ...`.
 
