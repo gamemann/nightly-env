@@ -167,6 +167,19 @@ if [ -n "$OFFLOAD" ] && [ -x "$OFFLOAD" ] && [ "${GPU_OFFLOAD:-1}" != 0 ]; then
 fi
 
 mkdir -p "$DIR" 2>/dev/null; chmod 1777 "$DIR" 2>/dev/null
+# Lock, .who and peaks files are shared by every user on the box (agents run as core, gamedev and christian). A file
+# created by one user under the default umask (664) made the next user's `exec >> lock` fail with exit 70 (PH, 2026-11-15).
+# pub_file creates one world-writable; it is idempotent and silent when the chmod is not ours to do.
+pub_file() {
+  [ -e "$1" ] || ( umask 0; : >> "$1" ) 2>/dev/null
+  chmod a+rw "$1" 2>/dev/null
+  return 0
+}
+# Open a lock fd: append if we may write, else read-only (flock needs no write access) so a foreign 644 file still queues us.
+open_lock() { # <fdvar> <path>
+  pub_file "$2"
+  eval "exec {$1}>>\"\$2\"" 2>/dev/null || eval "exec {$1}<\"\$2\"" 2>/dev/null
+}
 # Dynamic gate: the memory this command needs is what it peaked at in recent runs (x1.25), not a
 # fixed number. No history: MIN_AVAIL_GB. A waiter short of memory first asks the kernel to give
 # back page cache (memory.reclaim, then drop_caches) before it keeps waiting.
@@ -191,7 +204,7 @@ if [ "$lane" = build ] && [ "${HEAVY_LONG_MAX:-1}" -gt 0 ]; then
   case " $* " in *surf_rides.tscn*) long=1; qlane=long ;; esac
 fi
 # FIFO: a waiter only tries for a slot when its ticket is the oldest live one in its lane, so none starves.
-ticket="$DIR/queue.$qlane.$(date +%s%N).$$"; : > "$ticket"; trap 'rm -f "$ticket"' EXIT
+ticket="$DIR/queue.$qlane.$(date +%s%N).$$"; echo "$need_mb" > "$ticket"; trap 'rm -f "$ticket"' EXIT
 while :; do
   head=
   for t in "$DIR"/queue.$qlane.*; do
@@ -205,7 +218,15 @@ while :; do
     exit 124
   fi
   at_head=1
+  # Backfill (2026-11-13): the head waiting for more memory than is free (its history says 7.6 GB, 5 GB free,
+  # a slot idle) blocked every smaller job behind it for 50+ min. While the head cannot start for memory, a
+  # waiter whose own need fits may try for the free slot; the head keeps its place.
+  backfill=0
   if [ -n "$head" ] && [ "$head" != "$ticket" ]; then
+    hneed=$(cat "$head" 2>/dev/null); hneed=${hneed//[!0-9]/}
+    if [ -n "$hneed" ] && [ "$hneed" -gt "$need_mb" ] && [ "$(avail_kb)" -lt $((hneed * 1024)) ]; then backfill=1; fi
+  fi
+  if [ -n "$head" ] && [ "$head" != "$ticket" ] && [ "$backfill" = 0 ]; then
     at_head=0
     if [ $((now - last_note)) -ge 60 ]; then
       echo "heavy: queued for a $lane slot ($((now - start))s), behind $(ls "$DIR"/queue.$qlane.* 2>/dev/null | awk -v me="$ticket" '$0==me{exit} {n++} END{print n+0}') job(s)." >&2
@@ -213,7 +234,7 @@ while :; do
     fi
   else
     for i in $(seq 1 "$slots"); do
-      exec {fd}>>"$DIR/$lane.$i.lock" || exit 70
+      open_lock fd "$DIR/$lane.$i.lock" || exit 70
       # The slot is kept only if the memory for it is free now: a job that owns a slot while it
       # waits for memory blocks every other job behind it (dev02, 2026-10-31, 1-2 h).
       if flock -n "$fd"; then
@@ -222,7 +243,7 @@ while :; do
            { [ "$i" -eq 1 ] || [ "$lane" != build ] || [ "$avail" -ge $(( (need_mb + (EXTRA_AVAIL_GB - MIN_AVAIL_GB) * 1024) * 1024 )) ]; }; then
           if [ "$long" = 1 ]; then
             for j in $(seq 1 "${HEAVY_LONG_MAX:-1}"); do
-              exec {lfd}>>"$DIR/long.$j.lock" || exit 70
+              open_lock lfd "$DIR/long.$j.lock" || exit 70
               flock -n "$lfd" && { slot=$i; break 3; }
               exec {lfd}>&-; lfd=
             done
@@ -244,7 +265,7 @@ while :; do
     HEAVY_HELD=offload "$OFFLOAD" offer "$@"
     rc=$?
     [ "$rc" != 75 ] && exit "$rc"
-    : > "$ticket"
+    echo "$need_mb" > "$ticket"
     now=$(date +%s)
   fi
   if [ "$at_head" = 1 ] && [ $((now - last_note)) -ge 60 ]; then
@@ -258,7 +279,7 @@ while :; do
   sleep 3
 done
 rm -f "$ticket"
-printf '%s pid %s since %s: %s\n' "$(whoami)@$(hostname -s)" "$$" "$(date +%H:%M:%S)" "$*" | cut -c1-300 > "$DIR/$lane.$slot.who"
+printf '%s pid %s since %s: %s\n' "$(whoami)@$(hostname -s)" "$$" "$(date +%H:%M:%S)" "$*" | cut -c1-300 2>/dev/null > "$DIR/$lane.$slot.who"; pub_file "$DIR/$lane.$slot.who"
 
 waited=$(( $(date +%s) - start ))
 [ "$waited" -ge 3 ] && echo "heavy: $lane/$slot acquired after ${waited}s" >&2
@@ -313,8 +334,10 @@ while kill -0 "$jpid" 2>/dev/null; do
 done
 wait "$jpid"; rc=$?
 if [ "$rc" = 0 ] && [ "$peak" -gt 0 ]; then
-  printf '%s\t%s\n' "$KEY" "$peak" >> "$PEAKS"
-  tail -500 "$PEAKS" > "$PEAKS.t" 2>/dev/null && mv "$PEAKS.t" "$PEAKS"
+  pub_file "$PEAKS"
+  printf '%s\t%s\n' "$KEY" "$peak" >> "$PEAKS" 2>/dev/null
+  # Trim through a private temp file; mv over another user's peaks is refused in the sticky dir, so fall back to rewriting in place.
+  pt=$(mktemp "$DIR/peaks.t.XXXXXX" 2>/dev/null) && { tail -500 "$PEAKS" > "$pt" 2>/dev/null && chmod a+rw "$pt" 2>/dev/null && { mv -f "$pt" "$PEAKS" 2>/dev/null || cat "$pt" > "$PEAKS" 2>/dev/null; }; rm -f "$pt"; }
 fi
 [ "$rc" = 124 ] && echo "heavy: stopped after ${MAX_MIN} min (HEAVY_JOB_MAX_MIN) so it cannot hold a slot for hours." >&2
 if [ "$rc" = 137 ] && [ ${#scope[@]} -gt 0 ]; then
@@ -325,5 +348,5 @@ if [ "$rc" = 137 ] && [ ${#scope[@]} -gt 0 ]; then
     echo "heavy: killed (SIGKILL), not by its ${job_mb} MB ceiling as far as the journal shows: somebody else killed it." >&2
   fi
 fi
-: > "$DIR/$lane.$slot.who"
+: 2>/dev/null > "$DIR/$lane.$slot.who"
 exit $rc

@@ -21,7 +21,8 @@ ssh $H "$SU mkdir -p /home/core/pb" || exit 1
 rsync -az --delete --rsync-path="$RS" \
   --exclude=/node_modules --exclude='/.next*' --exclude=/.git --exclude=/tests/.artifacts --exclude=/tests/.report --exclude='*.tsbuildinfo' --exclude='/.env.*' --exclude='*.pem' --exclude='*.key' --exclude=/certificates --exclude=/ssl \
   "$wt/" "$H:/home/core/pb/$name/" || exit 1
-if ! ssh $H "test -d /home/core/pb/_nm/$hash/node_modules"; then
+# as core (SU): ~core/pb is not traversable by other users, so a plain `test -d` as christian always failed and re-seeded every run
+if ! ssh $H "$SU test -d /home/core/pb/_nm/$hash/node_modules"; then
   [ -d "$wt/node_modules" ] || { echo "phbuild: no node_modules in $wt to seed the PH cache from (run npm ci there once; PH has no registry token)" >&2; exit 1; }
   echo "phbuild: seeding node_modules cache $hash from $wt (first use of this lockfile)" >&2
   ssh $H "$SU mkdir -p /home/core/pb/_nm/$hash" && \
