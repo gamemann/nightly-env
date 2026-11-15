@@ -90,7 +90,9 @@ esac
 case "$PWD" in
   /home/gamedev/wt/*/*) echo "hv: WARNING $PWD is nested: not offerable to the boxes (needs ~/wt/<name> directly)" >&2 ;;
 esac
-unset GODOT GPU_OFFLOAD
+# GPU_OFFLOAD and GPU_SUITE_BOXES (and GPU_BOX) set by the caller are passed through to heavy/gpu.sh (2026-11-15; hv used to
+# unset GPU_OFFLOAD). Only GODOT is cleared.
+unset GODOT
 # 2026-11-08: dev02 (47GB, swapping) ran 5 suites locally and never queued, so PH (40c, mostly idle) and staging got no offers.
 # 2026-11-11: 2 local build slots (was 1: a 90 min job starved all local-only jobs). Only 2 local build slots for hv jobs; the rest wait and are offered to PH/staging02/staging every 15 s. HEAVY_SLOTS_BUILD in env overrides.
 export HEAVY_SLOTS_BUILD=${HEAVY_SLOTS_BUILD:-2}
@@ -235,6 +237,34 @@ hv_guard() {
   wait "$pid"; rc=$?
   wait "$tpid" 2>/dev/null; rm -f "$tmp"; return $rc
 }
+# hv_infra (2026-11-15): gpu.sh reports a job its box killed (rc 137/143, or an OOM kill in its scope) as
+# "gpu.sh: INFRA KILL on <box>: ..." and that is not a suite result. Run the command again on another box, at most
+# HV_INFRA_RETRIES (default 2) times, with the killed box(es) removed from GPU_SUITE_BOXES (default "ph staging02 staging").
+# A GPU_BOX-pinned job has no other box, so it is not retried. Always call it as a subshell-safe unit: it exports
+# GPU_SUITE_BOXES, so hv_shard runs it as `( hv_infra ... )`.
+hv_infra_boxes() { # killed-box... -> the boxes still allowed, one line
+  local b k keep=""
+  for b in ${GPU_SUITE_BOXES:-ph staging02 staging}; do
+    for k in "$@"; do [ "$b" = "$k" ] && continue 2; done
+    keep="$keep $b"
+  done
+  echo "${keep# }"
+}
+hv_infra() {
+  local try=0 max=${HV_INFRA_RETRIES:-2} rc out k killed=() left
+  while :; do
+    out=$(mktemp /tmp/hv-infra.XXXXXX) || { "$@"; return $?; }
+    "$@" 2>&1 | tee "$out"; rc=${PIPESTATUS[0]}
+    k=$(sed -n 's/^gpu\.sh: INFRA KILL on \([A-Za-z0-9_-]*\):.*/\1/p' "$out" | tail -n 1)
+    rm -f "$out"
+    case $rc in 75|137|143) ;; *) return "$rc" ;; esac
+    [ -n "$k" ] && [ -z "${GPU_BOX:-}" ] && [ "$try" -lt "$max" ] || return "$rc"
+    killed+=("$k"); left=$(hv_infra_boxes "${killed[@]}")
+    [ -n "$left" ] || { echo "hv: INFRA KILL on ${killed[*]}: no other box left to try; rc $rc stands" >&2; return "$rc"; }
+    try=$((try + 1)); export GPU_SUITE_BOXES=$left
+    echo "hv: INFRA KILL on $k (rc $rc): not a suite failure; running it again on: $left (retry $try of $max)" >&2
+  done
+}
 hv_desc() { local c; for c in $(pgrep -P "$1" 2>/dev/null); do hv_desc "$c"; echo "$c"; done; }
 hv_shard() {
   local noparse=0 jobs=${HV_SHARD_JOBS:-} suites=() s all=0
@@ -309,7 +339,7 @@ hv_shard() {
         T=$t; [ $((mt + 900)) -gt "$T" ] && T=$((mt + 900)); [ "$T" -lt 1800 ] && T=1800
         for try in 1 2; do
           st=$(date +%s)
-          HV_SHARD=1 HEAVY_JOB_MAX_MIN=$((T / 60 + 5)) hv_guard heavy -- timeout "$T" ./game.sh --no-parse test "$s" > "$run/$s.out" 2>&1 </dev/null
+          ( HV_SHARD=1 HEAVY_JOB_MAX_MIN=$((T / 60 + 5)) hv_infra hv_guard heavy -- timeout "$T" ./game.sh --no-parse test "$s" ) > "$run/$s.out" 2>&1 </dev/null
           rc=$?; en=$(date +%s)
           if [ "$try" = 1 ]; then case $rc in 75|137|255)
             mv -f "$run/$s.out" "$run/$s.out.try1"; echo "hv: shard: $s exited $rc (killed/lost); running it again" >&2; continue ;; esac; fi
@@ -387,9 +417,9 @@ if [ "$mode" = import ] && [ "${HV_IMPORT_LOCAL:-0}" != 1 ] && hv_offload_on; th
   exit 0
 fi
 case $mode in
-  game)   hv_guard heavy -- timeout "$t" ./game.sh "$@"; exit $? ;;
+  game)   ( hv_infra hv_guard heavy -- timeout "$t" ./game.sh "$@" ); exit $? ;;
   shard)  hv_shard "$@" ;;
-  scene)  hv_guard heavy -- timeout "$t" godot --headless --path . "$@"; exit $? ;;
+  scene)  ( hv_infra hv_guard heavy -- timeout "$t" godot --headless --path . "$@" ); exit $? ;;
   import) exec heavy -- timeout "$t" godot --headless --path . --import ;;
   # local: tools/*.sh check/selftest/regen/convert jobs are offered to PH by heavy -> gpu.sh (2026-11-11), else run here
   local)  exec heavy -- "$@" ;;
