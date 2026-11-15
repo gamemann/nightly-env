@@ -149,7 +149,7 @@ def create(repos):
                "TMC_QUERY_BIND": "*", "TMC_BIND": "0.0.0.0", "TMC_NAME": "TMC Dev - " + name,
                "TMC_MAX_PLAYERS": "32" if repo == MULTI else "16", "TMC_ALLOW_WEB": "1", "TMC_ALLOW_DESKTOP": "1", "TMC_ALLOW_MOBILE": "1",
                "TMC_WEB_LOADER": "", "TMC_WEB_BUILD": "", "TMC_CHANNEL": "latest", "TMC_AUTO_UPDATE": "when-needed",
-               "DEPLOY_REPO": "https://github.com/modcommunity/dot-server-deploy.git", "DEPLOY_BRANCH": "main",
+               "DEPLOY_REPO": "https://github.com/gamespice-platform/server-deploy.git", "DEPLOY_BRANCH": "main",
                "TMC_VERBOSE": ""}
         body = {"name": "TMC Dev - " + name, "external_id": "tmc-dev-" + repo, "user": 1, "egg": egg_id(),
                 "description": "TMC dev environment (~/projects/docs/dev-environment.md)",
