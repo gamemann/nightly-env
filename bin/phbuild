@@ -34,7 +34,8 @@ q=$(printf '%q ' "$@")
 # Run the package.json test script with its quoted globs replaced by a find list.
 case "$*" in "npm test"|"npm run test")
   # shell-quoted: the remote bash re-reads $q as one command line
-  q="node --import tsx --import ./scripts/sprite-test-loader.mjs --test \$(find src -name '*.test.ts' | sort)" ;;
+  # website-city needs its sprite loader; repos without it (website-gs) must not import a missing file
+  q="node --import tsx \$([ -f scripts/sprite-test-loader.mjs ] && echo --import ./scripts/sprite-test-loader.mjs) --test \$(find src -name '*.test.ts' | sort)" ;;
 esac
 exec ssh $H "${SU:+$SU }bash -s" <<EOF
 set -e
