@@ -74,6 +74,8 @@ Names only, so you know what exists; what each is and what is unusual about it i
 
 Read each project's own `CLAUDE.md` before working in it.
 
+**Visual QA of models and animations** (weapons, view arms, avatars, NPCs): judge them from rendered motion, not from passing suites. FC's loop is the reference: game-arena `docs/anim-review.md` (`tools/anim_review.sh` captures 60 fps first-person, behind-right and opponent views; `tools/anim_review_post.sh` posts clips to a nightly review with their fps so the viewer steps frame by frame). Check every clip against its defect checklist (clipping arms, floating hands, finger grip, muzzle origin, T-pose, texture stretching, pops), note findings on the item, file what you cannot fix, and re-capture until clean. Other games adopt it through `dot-game-visual-qa-1` and their `<game>-visual-qa-1` items.
+
 ## Family-wide conventions
 
 Breaking one of these is a breaking change across the whole family.
