@@ -28,7 +28,7 @@ if (PERSIST) {
 }
 // --game-query k=v: adds a query to the game shell's page URL before it runs (e.g. log=debug), without touching the framing site.
 const gq = opt('--game-query', '');
-if (gq) await ctx.addInitScript(q => { if (location.hostname.endsWith('dotgames.org')) { const u = new URLSearchParams(location.search); const [k, v] = q.split('='); u.set(k, v); history.replaceState(null, '', location.pathname + '?' + u); } }, gq);
+if (gq) await ctx.addInitScript(q => { if (/(^|\.)(dotgames\.org|gamespice\.net)$/.test(location.hostname)) { const u = new URLSearchParams(location.search); const [k, v] = q.split('='); u.set(k, v); history.replaceState(null, '', location.pathname + '?' + u); } }, gq);
 // --session FILE: a site session token (dev's database sessions need no signing), to join signed in instead of as a guest.
 const SESSION = opt('--session', null);
 if (SESSION) {
