@@ -113,8 +113,8 @@ def ensure_allocations(repos):
 
 
 def memory_for(repo):
-    """The zombie game's server peaks near 1 GB while loading a map, so 900 MB made the kernel kill it in a loop."""
-    return {MULTI: 1800, "game-zombie-zone": 1800}.get(repo, 900)
+    """The zombie game's server peaks near 1 GB loading a map, and above 2.1 GB once the maps pack (54 maps) is mounted: 1800 MB was OOM-killed."""
+    return {MULTI: 3500, "game-zombie-zone": 3500}.get(repo, 900)
 
 
 def create(repos):
