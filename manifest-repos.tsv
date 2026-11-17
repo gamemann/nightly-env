@@ -14,6 +14,7 @@ core	/home/core/projects/website-processing	git@github.com:modcommunity/website-
 core	/home/core/projects/website-status	git@github.com:modcommunity/website-status.git	main
 core	/home/core/projects/zees-games	git@github.com:zees-games/website.git	main
 gamedev	/home/gamedev/projects/archive/dot-randomness	git@github.com:modcommunity/dot-randomness.git	main
+gamedev	/home/gamedev/projects/godot/airdrift-maps	git@github.com:zees-games/airdrift-maps.git	main
 gamedev	/home/gamedev/projects/godot/arena-dm-maps	git@github.com:zees-games/arena-dm-maps.git	main
 gamedev	/home/gamedev/projects/godot/arena-surf-dm-maps	git@github.com:zees-games/arena-surf-dm-maps	main
 gamedev	/home/gamedev/projects/godot/arena-weapons	git@github.com:zees-games/arena-weapons.git	main
@@ -94,14 +95,12 @@ gamedev	/home/gamedev/projects/godot/dot-vote	git@github.com:gamespice-platform/
 gamedev	/home/gamedev/projects/godot/dot-weapon	git@github.com:gamespice-platform/weapon.git	main
 gamedev	/home/gamedev/projects/godot/dot-weather	git@github.com:gamespice-platform/weather.git	main
 gamedev	/home/gamedev/projects/godot/dot-workbench	git@github.com:gamespice-platform/workbench.git	main
-gamedev	/home/gamedev/projects/godot/g2gfast-maps	git@github.com:zees-games/g2gfast-maps.git	main
+gamedev	/home/gamedev/projects/godot/game-airdrift	git@github.com:zees-games/game-airdrift.git	main
 gamedev	/home/gamedev/projects/godot/game-arena	git@github.com:zees-games/game-arena.git	main
-gamedev	/home/gamedev/projects/godot/game-g2gfast	git@github.com:zees-games/game-g2gfast.git	main
 gamedev	/home/gamedev/projects/godot/game-hide-n-seek	git@github.com:zees-games/game-hide-n-seek.git	main
 gamedev	/home/gamedev/projects/godot/game-hungario	git@github.com:zees-games/game-hungario.git	main
 gamedev	/home/gamedev/projects/godot/game-murder-mystery	git@github.com:zees-games/game-murder-mystery	main
-gamedev	/home/gamedev/projects/godot/game-playground	git@github.com:zees-games/game-playground.git	main
-gamedev	/home/gamedev/projects/godot/game-playground-maps	git@github.com:zees-games/game-playground-maps.git	main
+gamedev	/home/gamedev/projects/godot/game-playlot	git@github.com:zees-games/game-playlot.git	main
 gamedev	/home/gamedev/projects/godot/game-zombie-zone	git@github.com:zees-games/game-zombie-zone.git	main
 gamedev	/home/gamedev/projects/godot/hide-n-seek-maps	git@github.com:zees-games/hide-n-seek-maps.git	main
 gamedev	/home/gamedev/projects/godot/lam-maps	git@github.com:zees-games/lam-maps.git	main
@@ -118,6 +117,7 @@ gamedev	/home/gamedev/projects/godot/mg-wipeout-maps	git@github.com:zees-games/m
 gamedev	/home/gamedev/projects/godot/murder-mystery-maps	git@github.com:zees-games/murder-mystery-maps	main
 gamedev	/home/gamedev/projects/godot/natural-disasters	git@github.com:zees-games/natural-disasters.git	main
 gamedev	/home/gamedev/projects/godot/npc-bugged-up	git@github.com:zees-games/npc-bugged-up.git	main
+gamedev	/home/gamedev/projects/godot/playlot-maps	git@github.com:zees-games/playlot-maps.git	main
 gamedev	/home/gamedev/projects/godot/zed-dot-weapons	git@github.com:zees-games/zed-dot-weapons.git	main
 gamedev	/home/gamedev/projects/godot/zee-dot-weapons	git@github.com:zees-games/zee-dot-weapons.git	main
 gamedev	/home/gamedev/projects/godot/zombie-zone-maps	git@github.com:zees-games/zombie-zone-maps.git	main
@@ -126,3 +126,7 @@ gamedev	/home/gamedev/projects/godot/zz-medieval-weapons	git@github.com:zees-gam
 gamedev	/home/gamedev/projects/godot/zz-modern-weapons	git@github.com:zees-games/zz-modern-weapons.git	main
 gamedev	/home/gamedev/projects/godot/zz-ply-class-pack	git@github.com:zees-games/zz-ply-class-pack.git	main
 gamedev	/home/gamedev/projects/lockclone/dot-server-deploy	https://github.com/gamespice-platform/server-deploy.git	main
+gamedev	/home/gamedev/projects/godot/g2gfast-maps	airdrift-maps	link
+gamedev	/home/gamedev/projects/godot/game-g2gfast	game-airdrift	link
+gamedev	/home/gamedev/projects/godot/game-playground	game-playlot	link
+gamedev	/home/gamedev/projects/godot/game-playground-maps	playlot-maps	link

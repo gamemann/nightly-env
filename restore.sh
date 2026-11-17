@@ -7,6 +7,12 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 who="${1:?usage: restore.sh core|gamedev [--dry-run]}"; dry="${2:-}"
 while IFS=$'\t' read -r u path remote branch; do
   [ "$u" = "$who" ] || continue
+  if [ "$branch" = "link" ]; then  # a renamed checkout's old name, kept as a symlink: path -> remote column
+    if [ -e "$path" ] || [ -L "$path" ]; then echo "have $path"; continue; fi
+    echo "link $path -> $remote"
+    [ "$dry" = "--dry-run" ] || ln -s "$remote" "$path"
+    continue
+  fi
   if [ -e "$path/.git" ]; then echo "have $path"; continue; fi
   echo "clone $remote -> $path"
   [ "$dry" = "--dry-run" ] && continue

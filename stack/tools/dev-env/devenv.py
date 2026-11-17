@@ -29,8 +29,10 @@ DEV_PUB = f"{HOME}/.config/dot/pack-dev.pub"  # the dev site's pack-signing publ
 CA_BUNDLE = "/etc/ssl/certs/ca-certificates.crt"  # dev02's bundle, which includes the TMC Local Development CA
 
 # repo, display name, max players. Game port is 6100 + 2*i, RCON one up.
-GAMES = [("game-arena", "Arena"), ("game-zombie-zone", "Zombie Zone"), ("game-playground", "Playground"),
-         ("game-g2gfast", "g2gfast"), ("game-hungario", "Hungario"), ("game-hide-n-seek", "Hide n Seek"),
+# Playlot and Airdrift keep their pre-rename keys here: the key is the panel's external id (tmc-dev-<key>), the
+# ip-plan.json key and the pack id the dev server installs. REPO_ALIASES lets every command take the new names.
+GAMES = [("game-arena", "Arena"), ("game-zombie-zone", "Zombie Zone"), ("game-playground", "Playlot"),
+         ("game-g2gfast", "Airdrift"),("game-hungario", "Hungario"), ("game-hide-n-seek", "Hide n Seek"),
          ("game-murder-mystery", "Murder Mystery"), ("mg-smash-copter", "Smash Copter"),
          ("mg-buses-from-hell", "Buses From Hell"), ("mg-wipeout", "Wipeout"), ("mg-deathrun", "Deathrun"),
          ("mg-dangerous-delivery", "Dangerous Delivery"), ("mg-look-at-me", "Look At Me"), ("mg-prop-hunt", "Prop Hunt"),
@@ -39,6 +41,12 @@ GAMES = [("game-arena", "Arena"), ("game-zombie-zone", "Zombie Zone"), ("game-pl
 MULTI = "multi"
 # Packs published under another id than the repo (dot-server-deploy reports these as retired ids).
 CONTENT_IDS = {"mg-deathrun": "game-deathrun", "mg-prop-hunt": "game-prop-hunt"}
+# Renamed game checkouts -> the key their dev server is filed under (see GAMES).
+REPO_ALIASES = {"game-playlot": "game-playground", "game-airdrift": "game-g2gfast"}
+
+
+def canon(repos):
+    return [REPO_ALIASES.get(r.rstrip("/").split("/")[-1], r) for r in repos]
 
 
 def game_env(repo):
@@ -312,6 +320,10 @@ if __name__ == "__main__":
                 raise SystemExit(f"unknown profile {val!r}: {', '.join(PROFILES)}")
             site = PROFILES[val] if opt == "--profile" else val.rstrip("/")
     cmd, rest = (args[0], args[1:]) if args else ("list", [])
+    if cmd not in ("power", "console"):
+        rest = canon(rest)
+    elif rest:
+        rest = rest[:1] + canon(rest[1:]) if cmd == "power" else canon(rest[:1]) + rest[1:]
     if cmd == "list":
         listing()
     elif cmd == "create":
