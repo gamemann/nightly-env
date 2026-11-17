@@ -2,6 +2,7 @@
 // what the page and the game client did, and take screenshots to look at. Prints JSON; exit 0 only when a game socket to a
 // dev server opened and stayed up.
 //   node web_check.mjs [out.png] [--app 101] [--join <server id>] [--site https://tmcdev.net] [--session token-file] [--stay SEC]
+//   [--node-ip IP] [--host NAME] [--port N]   the server's row (default 10.50.0.3, tmcdev.net, any 61xx game port)
 // --stay keeps the player in the game SEC seconds after it is in (bots kill it, the server files its stats).
 const pw = (await import(process.env.PWCORE ?? '/home/christian/.cache/pwcore/node_modules/playwright-core/index.js')).default;
 const { chromium } = pw;
@@ -10,7 +11,10 @@ const args = process.argv.slice(2);
 const opt = (k, d) => (args.includes(k) ? args[args.indexOf(k) + 1] : d);
 const out = args.find(a => a.endsWith('.png')) ?? '/tmp/web-check.png';
 const SITE = opt('--site', 'https://tmcdev.net'), APP = opt('--app', '101'), JOIN = opt('--join', '652113');
-const NODE = '10.50.0.119', HOST = 'x-gs01.deacon.internal', PROXY = 'tmcdev.net:61';
+// The game server's address comes from --node-ip / --host / --port (a dev server's ip4 / hostName / port in its Server row); defaults are the
+// plan's node IP and the dev proxy. Without --port, any socket on a 61xx game port (devenv.py: 6100 + 2*i) counts as a game socket.
+const NODE = opt('--node-ip', '10.50.0.3'), HOST = opt('--host', 'tmcdev.net'), GPORT = opt('--port', '');
+const isGameSocket = u => (GPORT ? u.includes(`:${GPORT}`) : /:61\d\d(\/|\?|$)/.test(u)) && (u.includes(NODE) || u.includes(HOST));
 
 const launchArgs = { headless: true, handleSIGTERM: false, executablePath: process.env.CHROME ?? '/usr/bin/chromium', args: ['--disable-features=LocalNetworkAccessChecks,PrivateNetworkAccessChecks', '--use-gl=swiftshader', '--enable-unsafe-swiftshader'] };
 // The dev site's certificate is from the TMC Local Development CA, which this headless browser does not carry.
@@ -81,7 +85,7 @@ try {
     if (await b.isVisible({ timeout: 15000 }).catch(() => false)) { await b.click({ timeout: 10000 }).catch(e => failures.push(`click ${name}: ${e.message}`.slice(0, 160))); await page.waitForTimeout(3000); }
   }
   const deadline = Date.now() + 120000;
-  while (Date.now() < deadline && !sockets.some(s => (s.url.includes(NODE) || s.url.includes(HOST) || s.url.includes(PROXY)) && s.frames > 0)) await page.waitForTimeout(1000);
+  while (Date.now() < deadline && !sockets.some(s => isGameSocket(s.url) && s.frames > 0)) await page.waitForTimeout(1000);
   // Then the game's download and load: wait for the shell's own word that it is in, or 120 s.
   function inGame() { return log.some(l => /join timings|entered the game|game ready/i.test(l)); }
   const until = Date.now() + 240000;
@@ -112,7 +116,7 @@ try {
   // Also on SIGTERM, so a run stopped by `timeout` still says how far it got.
   async function report(stopped) {
     await (game ?? page).screenshot({ path: out }).catch(() => {});
-    const gameSockets = sockets.filter(s => s.url.includes(NODE) || s.url.includes(HOST) || s.url.includes(PROXY));
+    const gameSockets = sockets.filter(s => isGameSocket(s.url));
     const ok = !stopped && gameSockets.some(s => s.frames > 0 && !s.error) && inGame();
     console.log(JSON.stringify({ ok, stopped: !!stopped, listed, screenshots: [listShot, out], gameUrl: game?.url() ?? null, gameSockets, otherSockets: sockets.filter(s => !gameSockets.includes(s)),
       frames: [...frames].map(f => f.url()).filter(u => u && u !== 'about:blank').slice(0, 10), failures: failures.slice(0, 30),
