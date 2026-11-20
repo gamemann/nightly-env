@@ -53,6 +53,10 @@ takes every script that references it down with it.
 
 The bridges those refusals imply live in the games. `game-arena` and `game-hungario`
 are where they are written, and where they are run.
+That is about addons not importing each other; it never meant games may copy each other.
+A bridge two games both need goes in dot-game (or the addon that fits) as a base the games
+extend; check [ADDONS.md](ADDONS.md) first. The pre-push hook's `check-duplication.py
+--siblings` refuses new code a game shares with another game.
 
 ## Local development, checks, conventions
 
