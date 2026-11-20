@@ -17,6 +17,7 @@
 # --dev also registers the build on dev_games afterwards (tools/dev-shell-publish.sh --register-only).
 # --api SITE --app FOLDER (or SHELL_API / SHELL_PUBLISH_TOKEN in the env file) publishes through the site's web build
 # API instead of writing to the bucket; it passes straight through (needs dot-server-deploy at or after dfa9518).
+# Prod content origin: --origin https://content.gamespice.net (dotgames.org answers 404 since the storez move).
 # Everything else is publish-web-shell.sh's: run it with --help.
 set -euo pipefail
 
