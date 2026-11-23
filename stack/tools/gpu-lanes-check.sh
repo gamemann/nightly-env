@@ -7,7 +7,7 @@
 # Usage: tools/gpu-lanes-check.sh
 set -u
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-jobs=("dot-core examples/addon_config_selftest" "dot-team examples/team_selftest" "dot-locale examples/locale_selftest" "dot-vote examples/vote_selftest")
+jobs=("gs-core examples/addon_config_selftest" "gs-team examples/team_selftest" "gs-locale examples/locale_selftest" "gs-vote examples/vote_selftest")
 out=$(mktemp -d); trap 'rm -rf "$out"' EXIT
 i=0
 for j in "${jobs[@]}"; do
@@ -16,7 +16,7 @@ for j in "${jobs[@]}"; do
 done
 max=0
 while [ "$(ls "$out"/*.rc 2>/dev/null | wc -l)" -lt 4 ]; do
-	n=$("$ROOT/gpu.sh" capacity 2>/dev/null | grep -cE "running:.* (dot-core|dot-team|dot-locale|dot-vote): godot --headless")
+	n=$("$ROOT/gpu.sh" capacity 2>/dev/null | grep -cE "running:.* (gs-core|gs-team|gs-locale|gs-vote): godot --headless")
 	[ "$n" -gt "$max" ] && max=$n
 	sleep 1
 done

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# hv: run a suite or scene through `heavy` in the ONE form dot-bootstrap/tools/gpu.sh can offload to the staging
+# hv: run a suite or scene through `heavy` in the ONE form gs-bootstrap/tools/gpu.sh can offload to the staging
 # boxes (cwd = a worktree directly under ~/wt or a checkout under ~/godot; `[timeout N] ./game.sh [--no-parse] test [suites]`
 # or `[timeout N] godot --headless --path . res://x.tscn`; no bash -c wrapper, no GODOT=, no absolute --path, no
 # GPU_/HEAVY_ env). Anything else queues behind dev02's 5 build slots and the boxes sit idle.
@@ -105,12 +105,12 @@ t=${HV_TIMEOUT:-2400}
 #   * addons referenced by res://addons/<n> in project.godot (plugins, autoloads) that are not present
 #   * dangling symlinks left in addons/ (committed relative links that do not resolve from ~/wt)
 #   * every addon symlink in the MAIN checkout's addons/ (what the repo itself needs; catches unlisted ones)
-#   * transitively: each linked addon's source repo has its own addons/ links (dot-cloud -> dot_core ...): same rule
+#   * transitively: each linked addon's source repo has its own addons/ links (gs-cloud -> gs_core ...): same rule
 #   * '# bootstrap-link: <src>' content entries (any repo with a .gitignore; game.sh is NOT required: library repos
-#     such as dot-map / dot-player-char / dot-radio have none, which is why v1 skipped them), plus an empty .stores
-#   * dot-server-deploy only: games/<name> and addons/<name> links and client/auth.json from the main checkout (2026-11-11, see below)
+#     such as gs-map / gs-player-char / gs-radio have none, which is why v1 skipped them), plus an empty .stores
+#   * gs-server-deploy only: games/<name> and addons/<name> links and client/auth.json from the main checkout (2026-11-11, see below)
 # Fails HERE (exit 3) if a hard need cannot be resolved. HV_NO_PREFLIGHT=1 skips it. Repos with no project.godot
-# (dot-map-convert is Python) only support `hv <dir> local ...`.
+# (gs-map-convert is Python) only support `hv <dir> local ...`.
 hv_resolve() { # addon name -> prints source dir
   local n=$1 d r=${1//_/-}
   for d in "/home/gamedev/godot/$r/addons/$n" ${main:+"$main/addons/$n"} /home/gamedev/godot/*/addons/"$n" /home/gamedev/projects/godot/*/addons/"$n"; do
@@ -155,8 +155,8 @@ hv_preflight() {
     elif [ -e "/home/gamedev/godot/$src" ]; then ln -sfn "/home/gamedev/godot/$src" "$path" && echo "hv: linked $path -> ~/godot/$src" >&2
     else missing="$missing $path(from $src)"; fi
   done < <(awk '/^# bootstrap-link: /{src=$3; next} src!="" && /^\//{print $0 "\t" src} {src=""}' .gitignore)
-  # dot-server-deploy worktrees (2026-11-11): games/, addons/ and client/auth.json are gitignored, so a fresh worktree has
-  # none of them and examples/solo_check.tscn fails to parse (no DotAuthClient, TmcSolo ...). All are linked from the MAIN
+  # gs-server-deploy worktrees (2026-11-11): games/, addons/ and client/auth.json are gitignored, so a fresh worktree has
+  # none of them and examples/solo_check.tscn fails to parse (no GSAuthClient, TmcSolo ...). All are linked from the MAIN
   # checkout, never overwritten (addons/ entries there are real copies, not links, so the addon rule above does not see them):
   #   * games/<name>: each entry of the main checkout's games/ (a link to a sibling checkout ~/godot/<name>, and the
   #     games/.gdignore), linked to the same absolute target. gpu.sh relinks a whole-repo link to the box's staged sibling.
@@ -166,7 +166,7 @@ hv_preflight() {
   #     job already rsyncs the main checkout's tree with --copy-links, so the box gets the same bytes it always did. Tool jobs
   #     list `git ls-files -co --exclude-standard`, which still omits it (gitignored).
   # Only targets outside ~/wt are linked: another worktree's private files are never shared. Undo: rm the symlinks.
-  if [ -n "$main" ] && [ "$(basename "$main")" = dot-server-deploy ]; then
+  if [ -n "$main" ] && [ "$(basename "$main")" = gs-server-deploy ]; then
     dsd_ok() { case $1 in "$HOME"/wt/*|/home/gamedev/wt/*) return 1 ;; esac; [ -n "$1" ] && [ -e "$1" ]; }
     if [ -d "$main/games" ]; then
       for g in "$main"/games/* "$main"/games/.gdignore; do
@@ -275,7 +275,7 @@ hv_shard() {
     -*) echo "hv: shard: unknown option $1 (suite args after -- are not supported: use hv game for those)" >&2; exit 2 ;;
     *) suites+=("${1%.tscn}"); shift ;;
   esac; done
-  # suite_shards (dot-game-template): `./game.sh suites --shards` lists SUITE.SHARD for a sharded suite (an older game.sh
+  # suite_shards (gs-game-template): `./game.sh suites --shards` lists SUITE.SHARD for a sharded suite (an older game.sh
   # ignores the flag and lists the suites). A sharded suite runs as one job per shard and then `test SUITE.merge` over
   # the logs the shards' jobs copied back (a local check-lane job: offload does not ship .godot/test-logs).
   local units=() merges=() r u found
@@ -309,7 +309,7 @@ hv_shard() {
   # heavy's queue ahead of other agents' jobs.
   local gpu=${HEAVY_OFFLOAD:-} free
   [ -n "$gpu" ] || gpu=$(sed -n 's/^OFFLOAD=//p' /etc/heavy.conf 2>/dev/null | tail -1)
-  [ -n "$gpu" ] || gpu=/home/gamedev/godot/dot-bootstrap/tools/gpu.sh
+  [ -n "$gpu" ] || gpu=/home/gamedev/godot/gs-bootstrap/tools/gpu.sh
   free=$(timeout 90 "$gpu" capacity 2>/dev/null | grep -oE '^[a-z0-9]+ +[0-9]+/' | awk '{s+=$2} END{print s+0}')
   [[ $jobs =~ ^[0-9]+$ ]] && [ "$jobs" -gt 0 ] || jobs=$(( ${free:-0} + 1 ))
   [ "$jobs" -lt 2 ] && jobs=2
@@ -403,13 +403,13 @@ case $mode in game|scene|import|shard|local) [ "${HV_NO_PREFLIGHT:-0}" = 1 ] || 
 # 2026-11-13: hv no longer imports here first. That separate local `heavy -- godot --import` ran for every fresh worktree
 # even when a box took the scene (gpu.sh imports on the box), and imports were 10 of 21 waiters in dev02's queue. Now the
 # job imports where it runs: a box imports itself, and heavy imports in the job's own slot when a never-imported project
-# runs a headless godot here (dot-bootstrap tools/heavy, HEAVY_NO_PREIMPORT=1 skips that).
+# runs a headless godot here (gs-bootstrap tools/heavy, HEAVY_NO_PREIMPORT=1 skips that).
 # hv import: with an offload box configured, every later hv game/shard/scene run imports where it runs, so a local import
 # only queues on dev02 for nothing. It is skipped then; HV_IMPORT_LOCAL=1 runs it here (a local tool that reads .godot).
 hv_offload_on() {
   local gpu=${HEAVY_OFFLOAD:-}
   [ -n "$gpu" ] || gpu=$(sed -n 's/^OFFLOAD=//p' /etc/heavy.conf 2>/dev/null | tail -1)
-  [ -n "$gpu" ] || gpu=/home/gamedev/godot/dot-bootstrap/tools/gpu.sh
+  [ -n "$gpu" ] || gpu=/home/gamedev/godot/gs-bootstrap/tools/gpu.sh
   [ -x "$gpu" ]
 }
 if [ "$mode" = import ] && [ "${HV_IMPORT_LOCAL:-0}" != 1 ] && hv_offload_on; then

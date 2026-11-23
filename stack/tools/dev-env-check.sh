@@ -49,7 +49,7 @@ if [ "$CDN_CHECK" = 1 ]; then
     for lock in "$DEV"/locks/*.lock.json; do
         [ -e "$lock" ] || { bad "no dev locks in $DEV/locks"; break; }
         n=$(basename "$lock" .lock.json); mkdir -p "$tmp/$n"
-        if timeout 1800 ~/godot/dot-bootstrap/tools/fetch_lock.sh "$lock" --root "$tmp/$n" --packs "$tmp/$n" --cfg /nonexistent --from "$CDN" >"$tmp/$n.log" 2>&1; then
+        if timeout 1800 ~/godot/gs-bootstrap/tools/fetch_lock.sh "$lock" --root "$tmp/$n" --packs "$tmp/$n" --cfg /nonexistent --from "$CDN" >"$tmp/$n.log" 2>&1; then
             ok "$n: $(find "$tmp/$n" -type f | wc -l) files from the dev CDN"
         else
             bad "$n: fetch_lock failed: $(grep -m1 -iE 'error|mismatch|fail' "$tmp/$n.log")"

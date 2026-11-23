@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # addon-fresh [game-dir]  (default: cwd). Stale-addon guard (nightly addon-checkouts-stale-guard-1).
-# A game's addons/<x> are symlinks into shared checkouts (dot-*, arena-*). A checkout behind its origin/main makes the game's
-# parse pass fail although the game is right (2026-11-11: dot-core 3 behind). Call this after a parse failure: for each distinct
+# A game's addons/<x> are symlinks into shared checkouts (gs-*, arena-*). A checkout behind its origin/main makes the game's
+# parse pass fail although the game is right (2026-11-11: gs-core 3 behind). Call this after a parse failure: for each distinct
 # linked checkout it fetches origin (20s cap) and prints a WARN line when HEAD is behind origin/main, with the ff command.
 # Warn only, never pulls. Dirty or diverged checkouts get a WARN that says to leave them alone. Always exits 0.
 d=${1:-.}; [ -d "$d/addons" ] || exit 0

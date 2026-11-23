@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# push-github.sh — push every dot-* / game-* repository under this directory.
+# push-github.sh — push every gs-* / game-* repository under this directory.
 #
 # Each subdirectory of godot/ is its own Git repository (see ../CLAUDE.md), so
 # "push the work" is one push per directory — fifty-eight of them as this is written,
@@ -29,7 +29,7 @@
 #   ./push-github.sh --dry-run    # say what it would push, touch nothing
 #   ./push-github.sh --force      # push a REWRITTEN history (see below)
 #   ./push-github.sh --no-parse   # skip the parse gate (see below)
-#   ./push-github.sh dot-timer …  # only these
+#   ./push-github.sh gs-timer …  # only these
 #
 # --force is for the one case an ordinary push cannot serve: history that has been
 # rewritten locally, where the remote's commits are no longer an ancestor of yours
@@ -57,12 +57,12 @@ cd "$(dirname "${BASH_SOURCE[0]}")" || exit 1
 # the thing that gets typed by accident.
 #
 # It is EMPTY, and the entry it used to hold is the reason the comment above is worth
-# keeping. `dot-server-setup-test` was excluded as a throwaway experiment that had no
+# keeping. `gs-server-setup-test` was excluded as a throwaway experiment that had no
 # GitHub repository; it is the deployment tool, it has had one for months, and the
 # exclusion outlived the reason for it — so the one repository an operator most needs
 # published was the one this script quietly skipped, in a line that reads as a
 # decision somebody made on purpose. An exclusion is a claim about today, and this one
-# also went stale by NAME: the directory is `dot-server-deploy` now, so the entry had
+# also went stale by NAME: the directory is `gs-server-deploy` now, so the entry had
 # stopped matching anything at all and was excluding nothing.
 NEVER_PUSH=()
 

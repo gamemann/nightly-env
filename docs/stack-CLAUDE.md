@@ -29,7 +29,7 @@ $N agent leave <short-name>                                 # when you are done
 - A refused claim means another live session is changing that path: do not edit it.
   Message the holder, and tell the user who holds it and what they are doing.
   Do not use `--force` unless the user says to.
-- Paths are relative to `~/stack` (`website-city`, `nightly`); work on x-tmc-dev02 is claimed as `dev02:<path under ~ there>` (`dev02:godot/dot-map`); a claim on a
+- Paths are relative to `~/stack` (`website-city`, `nightly`); work on x-tmc-dev02 is claimed as `dev02:<path under ~ there>` (`dev02:godot/gs-map`); a claim on a
   repository covers everything inside it.
 
 ## Spawning agents: pick the cheapest model that can do it
@@ -63,7 +63,7 @@ When you learn something while working, add the rule where it applies, in one li
 
 ## Game development moved to x-tmc-dev02
 
-Since 2026-10-14, TMC game development (the Godot tree, `dot-*` addons, games, map repos, `docs/`) lives on **`x-tmc-dev02`**, in `~/godot` and `~/docs` there. `~/stack/game-dev` on this machine is gone; never recreate it. This VM (`x-tmc-dev01`) stays the app and web VM, and the game VM uses this one's website-city, PostgreSQL, Redis and nginx (`tmcdev.net`) rather than running its own.
+Since 2026-10-14, TMC game development (the Godot tree, `gs-*` addons, games, map repos, `docs/`) lives on **`x-tmc-dev02`**, in `~/godot` and `~/docs` there. `~/stack/game-dev` on this machine is gone; never recreate it. This VM (`x-tmc-dev01`) stays the app and web VM, and the game VM uses this one's website-city, PostgreSQL, Redis and nginx (`tmcdev.net`) rather than running its own.
 
 **You have full access to x-tmc-dev02**: `ssh -i ~/.ssh/dev02 x-tmc-dev02` (user `christian`, `<dev02 internal hostname>`, `<dev02 IP>`). Read, edit, run Godot suites, commit and push there as you would here. Claude Code is installed there (`~/.local/bin/claude`); its own `~/CLAUDE.md` is the game tree's rules, read it before game work. Passwordless `sudo` works there (since 2026-10-14).
 

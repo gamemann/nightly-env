@@ -37,9 +37,9 @@ GAMES = [("game-arena", "Arena"), ("game-zombie-zone", "Zombie Zone"), ("game-pl
          ("mg-buses-from-hell", "Buses From Hell"), ("mg-wipeout", "Wipeout"), ("mg-deathrun", "Deathrun"),
          ("mg-dangerous-delivery", "Dangerous Delivery"), ("mg-look-at-me", "Look At Me"), ("mg-prop-hunt", "Prop Hunt"),
          ("multi", "Multi-game")]
-# "multi" is one server offering every game above, switched by the game vote (dot-server-deploy docs/game-vote.md).
+# "multi" is one server offering every game above, switched by the game vote (gs-server-deploy docs/game-vote.md).
 MULTI = "multi"
-# Packs published under another id than the repo (dot-server-deploy reports these as retired ids).
+# Packs published under another id than the repo (gs-server-deploy reports these as retired ids).
 CONTENT_IDS = {"mg-deathrun": "game-deathrun", "mg-prop-hunt": "game-prop-hunt"}
 # Renamed game checkouts -> the key their dev server is filed under (see GAMES).
 REPO_ALIASES = {"game-playlot": "game-playground", "game-airdrift": "game-g2gfast"}
@@ -97,12 +97,12 @@ def ip_of(repo):
 
 
 def egg_id():
-    """The "dot-server" egg (imported from dot-server-deploy/deploy/pterodactyl-egg.json): ids differ per panel."""
+    """The "gs-server" egg (imported from gs-server-deploy/deploy/pterodactyl-egg.json): ids differ per panel."""
     for n in call("application", "GET", "/nests?include=eggs")["data"]:
         for e in n["attributes"]["relationships"]["eggs"]["data"]:
-            if e["attributes"]["name"] == "dot-server":
+            if e["attributes"]["name"] == "gs-server":
                 return e["attributes"]["id"]
-    raise SystemExit("egg \"dot-server\" is not imported on the panel")
+    raise SystemExit("egg \"gs-server\" is not imported on the panel")
 
 
 def ensure_allocations(repos):
@@ -263,14 +263,14 @@ def provision(repos, site):
             write(ident, "/cfg/server/server.yml", yml2)
             changed.append("/cfg/server/server.yml")
         # A credential is only good on the site that issued it: on a site change drop it, so the box enrolls anew.
-        old_site = re.search(r'backbone_url:\s*"?([^"\n]*)', try_read(ident, "/cfg/server/addon/dot_auth/auth.yml"))
+        old_site = re.search(r'backbone_url:\s*"?([^"\n]*)', try_read(ident, "/cfg/server/addon/gs_auth/auth.yml"))
         if not old_site or old_site.group(1).rstrip("/") != site:
             listing = json.loads(try_read(ident, "/data/listing.json") or "{}")
             listing.pop("integration_token", None)
             listing["backbone_url"] = site
             write(ident, "/data/listing.json", json.dumps(listing, indent=4) + "\n")
             changed.append(f"site {old_site.group(1) if old_site else '?'} -> {site}, token dropped")
-        write(ident, "/cfg/server/addon/dot_auth/auth.yml", f'backbone_url: "{site}"\n')
+        write(ident, "/cfg/server/addon/gs_auth/auth.yml", f'backbone_url: "{site}"\n')
         write(ident, "/data/content.json", json.dumps(doc, indent=4) + "\n")
         write(ident, "/.runtime/dev-ca-bundle.crt", bundle)
         write(ident, "/override.cfg", override)

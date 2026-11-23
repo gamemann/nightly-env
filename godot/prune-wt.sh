@@ -11,7 +11,7 @@
 #        (nothing unpushed)
 #      - HEAD is an ancestor of origin/main (or origin/master), i.e. merged. Refs are not fetched;
 #        a stale origin/main only keeps more worktrees, never removes more.
-#      - no symlink under a checkout's or worktree's addons/ resolves into it (a game's addons/dot_game link)
+#      - no symlink under a checkout's or worktree's addons/ resolves into it (a game's addons/gs_game link)
 #    Branches are not deleted.
 # 2. Dangling links in /home/gamedev/wt are swept by godot/prune-wt-links.sh (nightly 1737),
 #    run as gamedev because that directory belongs to gamedev.
@@ -30,7 +30,7 @@ esac
 
 removed=0; kept=0
 
-# Symlink targets (nightly prune-sh-removes-1): a game's addons/dot_game may link into a worktree of
+# Symlink targets (nightly prune-sh-removes-1): a game's addons/gs_game may link into a worktree of
 # another repo, and removing that worktree leaves the game with a dangling addon. Collect every
 # symlink target under the addons dirs of the checkouts and worktrees once; a worktree that is, or
 # contains, one of those targets is kept.
@@ -49,7 +49,7 @@ is_link_target() {  # is_link_target <worktree dir>: 0 when some link resolves i
 
 for d in "$WT"/*/; do
   d=${d%/}
-  [ -L "$d" ] && continue            # links (e.g. arena-surf-dm-maps) are not worktrees
+  [ -L "$d" ] && continue            # links (e.g. fc-surf-dm-maps) are not worktrees
   [ -f "$d/.git" ] || continue       # only linked worktrees have a .git file
   name=${d##*/}
 

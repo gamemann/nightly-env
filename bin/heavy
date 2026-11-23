@@ -206,7 +206,7 @@ RT_MAX=${HEAVY_RT_MAX:-2}
 RT_GUARD_MB=${HEAVY_RT_GUARD_MB:-2048}
 rt_list=${HEAVY_REALTIME_SUITES:-}
 if [ -z "$rt_list" ]; then
-  for f in "${HEAVY_REALTIME_CONF:-}" "$(dirname "$(readlink -f "$0")")/realtime_suites.conf" "$HOME/godot/dot-bootstrap/tools/realtime_suites.conf"; do
+  for f in "${HEAVY_REALTIME_CONF:-}" "$(dirname "$(readlink -f "$0")")/realtime_suites.conf" "$HOME/godot/gs-bootstrap/tools/realtime_suites.conf"; do
     [ -n "$f" ] && [ -r "$f" ] && { rt_list=$(sed 's/#.*//' "$f" | tr '\n' ' '); break; }
   done
   [ -n "${rt_list// /}" ] || rt_list="headless_lossy headless_lossy_* headless_latency headless_feel"
