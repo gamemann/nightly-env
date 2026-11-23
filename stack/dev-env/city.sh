@@ -8,6 +8,8 @@ set -uo pipefail
 load_profile "${1:-default}"
 MODE="${2:-}"
 NAME="city-$PROFILE"
+# city-games under next dev --turbo reaches 6+ GB after a few requests and grows ~40 MB/request; 8G got it OOM-killed.
+[ "$PROFILE" = games ] && DEV_MEM_MAX="${DEV_MEM_MAX:-14G}"
 case "$MODE" in
     --stop) stop_port "$NAME" "$CITY_PORT"; exit ;;
     --status) port_busy "$CITY_PORT" && echo "$NAME: up on :$CITY_PORT (pid $(port_pid "$CITY_PORT")), db $DB_NAME, $SITE_URL" || echo "$NAME: down"; exit ;;
