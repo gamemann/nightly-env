@@ -46,6 +46,12 @@ start_bg() {
     [ -n "${DBUS_SESSION_BUS_ADDRESS:-}" ] || { [ -S "/run/user/$(id -u)/bus" ] && export DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u)/bus"; }
     local cap=(); [ -S "/run/user/$(id -u)/bus" ] && cap=(systemd-run --user --scope --quiet --collect --unit="dev-$name-$$"
         -p MemoryMax="${DEV_MEM_MAX:-8G}" -p MemorySwapMax=0 -p CPUWeight=50)
+    # V8 sizes its heap from host RAM, not the cgroup, so without a cap next dev grows to MemoryMax and is OOM-killed
+    # (city-games, 40 restarts in 3 days). Cap old space at 3/4 of DEV_MEM_MAX so it collects first.
+    local max=${DEV_MEM_MAX:-8G} mb; case "$max" in *G) mb=$(( ${max%G} * 768 ));; *M) mb=$(( ${max%M} * 3 / 4 ));; *) mb=6144;; esac
+    export NODE_OPTIONS="${NODE_OPTIONS:+$NODE_OPTIONS }--max-old-space-size=$mb"
+    # Keep the previous log: the watchdog restarts within a minute and used to overwrite the crash evidence.
+    [ -s "$LOG_DIR/$name.log" ] && mv -f "$LOG_DIR/$name.log" "$LOG_DIR/$name.prev.log"
     ( cd "$dir" && exec setsid "${cap[@]}" "$@" ) >"$LOG_DIR/$name.log" 2>&1 </dev/null &
     echo "$name: started (pid $!), log $LOG_DIR/$name.log"
 }
