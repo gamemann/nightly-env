@@ -1,74 +1,129 @@
-Scripts that run my game-development fleet (built around [nightly](https://github.com/gamemann/nightly)): a handful of Claude Code agents that build, test and benchmark a set of Godot 4 games and addons around the clock, spread over a few machines. Source of truth lives on the `core` user at `/home/core/projects/nightly-env`; the live paths are symlinks created by `install.sh`.
+<p align="center"><img src="docs/banner.png" alt="Nightly env and scripts" width="100%"></p>
+
+The scripts, cron jobs and units that run the TMC game-development fleet around [Nightly](https://github.com/gamemann/nightly): Claude Code agents that build, test and benchmark the FC (Fatal Contact), Playlot and Airdrift games and the GS (GameSpice) addons around the clock. The source of truth lives on the `core` user at `/home/core/projects/nightly-env`; the live paths are symlinks made by `install.sh`. The repository is public, so it holds no hostnames, addresses or credentials (see [Private values](#private-values)).
+
+## Contents
+
+| Section | What |
+|---|---|
+| [Environment](#environment) | The machines the scripts spread work over |
+| [bin](#bin) | Job queue, offload to build and GPU boxes, watchdog, remote builds |
+| [godot](#godot) | Game-tree tools: GPU offload, screenshots, worktree pruning, publishing |
+| [stack](#stack) | Web dev stack: dev servers, profiles, checks, dev game servers |
+| [cron and systemd](#cron-and-systemd) | Scheduled jobs and user units |
+| [Installers](#installers) | `install.sh`, `install-nightly.sh`, `restore.sh`, `manifest-repos.tsv` |
+| [Tests](#tests) | Shell tests for `heavy` and `hv` |
+| [Private values](#private-values) | Where hostnames and keys live |
+| [Install and restore](#install-and-restore) | Setting up or rebuilding a box |
 
 ## Environment
 
-Two virtual machines and two GPU machines in my homelab.
+One development VM plus a build VM and two GPU machines in the homelab (specs are approximate; hardware details are in the [homelab repo](https://github.com/gamemann/my-home-lab)).
 
-| Role | Machine | Specs | Used for |
-|---|---|---|---|
-| Development VM | VM on **Xtreme** (Proxmox, Intel i7-13700K, 64 GB DDR4, 4 TB NVMe) | 20 vCPUs, about 40 GB RAM, 3 TB NVMe, Debian 13, no GPU | Agents edit code, run git and orchestrate everything from here; quick tests, the nightly board |
-| Build and test VM | VM on **Powerhorse** (Dell Precision Tower 7810, 2x Xeon E5-2670 v3, 128 GB DDR4, Proxmox) | 40 vCPUs, 112 GB RAM, 320 GB disk, Debian 13, no GPU | Godot test suites, Rust and TypeScript builds, Playwright, headless benchmarks |
-| GPU desktop | **SpyKids**, a desktop | Intel i7-8700K, RTX 2070, 32 GB DDR4, 2 TB SATA SSD (Debian 13) | Windowed performance benchmarks, screenshots, video capture |
-| GPU laptop | **Staging01**, an ASUS TUF Gaming A17 | AMD Ryzen 7 4800H (8c/16t), GTX 1660 Ti, 16 GB DDR4, 1 TB NVMe (Linux Mint) | Windowed benchmarks and captures, shared with me while I use it |
+| Role | Machine | Used for |
+|---|---|---|
+| Development VM | VM on Xtreme (Proxmox, i7-13700K, 64 GB) | Agents edit code, run git and orchestrate; the Nightly panel |
+| Build and test VM | VM on Powerhorse (2x Xeon E5-2670 v3, 128 GB) | Godot suites, Rust and TypeScript builds, Playwright, headless benchmarks |
+| GPU desktop | SpyKids (i7-8700K, RTX 2070) | Windowed benchmarks, screenshots, video capture |
+| GPU laptop | Staging01 (Ryzen 7 4800H, GTX 1660 Ti) | Windowed benchmarks and captures |
 
-The full hardware list, hypervisors and networking are in my [homelab repo](https://github.com/gamemann/my-home-lab). The development VM is where the agents live. Anything heavy (suites, builds, imports) is pushed to the build VM by `hv`, so the development VM stays responsive. Windowed work goes to the GPU machines, because headless Godot cannot measure rendering or audio.
+Heavy work is pushed off the development VM by `hv`; windowed work goes to the GPU machines because headless Godot cannot measure rendering or audio.
 
-Specs are approximate and change as I move things around. The scripts never hardcode hostnames; see [Where private values live](#where-private-values-live).
+## bin
 
-## What is in here
+Queueing and offload. `heavy` is installed as root; the rest link into `~gamedev/bin` or `~core/bin`.
 
-| Dir | What |
+| Script | What it does | Usage |
+|---|---|---|
+| `heavy` | Memory-aware job queue: one build or suite at a time, scoped memory cap, wall-clock ceiling | `heavy [--lane build\|check] -- <cmd>`, `heavy --status` |
+| `hv` | Runs a suite or scene through `heavy` in the one form the GPU boxes can take; retries an infrastructure kill on another box | `hv <dir> game\|scene\|import\|local ...`, `hv baseline <repo>` |
+| `fleet-watchdog.sh` | Cron job: kills hung headless Godot jobs, keeps the heavy lane moving, writes a health file | cron, every 3 min |
+| `addon-fresh` | Stale-addon guard: reports addon checkouts behind origin/main after a parse failure | `addon-fresh [game-dir]` |
+| `phbuild` | Runs a heavy web command (tsc, lint, vitest, build) on the build VM | `phbuild <worktree> <cmd...>` |
+| `ph-smoke` | Route smoke sweep of the site in production mode on the build VM | `ph-smoke [claude\|default\|games]` |
+
+The `bin/*.bak-*` files are dated copies kept for rollback. Details: [docs/gamedev-CLAUDE.md](docs/gamedev-CLAUDE.md).
+
+## godot
+
+Tools for the game tree under `~gamedev/godot`.
+
+| Script | What it does | Usage |
+|---|---|---|
+| `gpu.sh` | Launcher for the family's GPU offload (`gs-bootstrap/tools/gpu.sh`) | `gpu.sh capacity` |
+| `attach-shot.sh` | Attaches a screenshot to a Nightly item | `attach-shot.sh <item> <png> [note]` |
+| `capture-reviews.sh` | Sends animation clips of a game to the Nightly reviews page | `capture-reviews.sh <game> [--all\|--dry-run]` |
+| `deploy-web-shell.sh` | Manual fallback for publishing the web shell | `deploy-web-shell.sh` |
+| `push-github.sh` | Pushes every `gs-*` and `game-*` repository | `push-github.sh` |
+| `prune-wt.sh` | Sweeps merged, clean worktrees | `prune-wt.sh [-n]` |
+| `prune-wt-links.sh` | Removes dangling worktree symlinks | `prune-wt-links.sh [-n]` |
+| `NOTES.md` | Layout notes for the game tree | |
+
+## stack
+
+Web dev stack helpers (user `core`).
+
+| Script | What it does | Usage |
+|---|---|---|
+| `dev.sh` | Brings the dev stack up with one command | `dev.sh [city processing ...\|all\|--stop\|--list]` |
+| `kill-intensive.sh` | Kills processes over 512 MB RSS (not sshd or systemd) | `kill-intensive.sh` |
+| `dev-env/city.sh`, `processing.sh`, `games-stack.sh`, `profile.sh` | Per-profile dev servers: `default`, `games`, `claude` | `city.sh [profile] [--fg\|--stop\|--status]` |
+| `scripts/check-layout-sync.sh` | Validates the shared site-nav and its consumers | `check-layout-sync.sh` |
+| `scripts/claude-usage.sh` | Claude plan usage for the account | `claude-usage.sh` |
+| `tools/dev-env-check.sh` | End-to-end check of the dev chain | `dev-env-check.sh [--profile P] [--browser]` |
+| `tools/gpu-lanes-check.sh` | Checks that the GPU boxes run jobs side by side | `gpu-lanes-check.sh` |
+| `tools/dev-env/devenv.py` | Manages dev game servers on the Pterodactyl panel | `devenv.py list\|create` |
+| `tools/dev-env/servers.sh`, `natmap.sh`, `web_check.sh` | Dev server lifecycle, nginx address map, Playwright checks | see script headers |
+
+## cron and systemd
+
+| File | What |
 |---|---|
-| `bin/` | `hv` (offload Godot suites and imports to the build VM or a GPU machine), `heavy` (queue wrapper that limits concurrent jobs, installed as root), `fleet-watchdog.sh` (kills stuck Godot jobs and writes a health file), `phbuild` (remote builds), `ph-smoke` |
-| `godot/` | Game-dev tools: `gpu.sh` (offload to a GPU machine), `attach-shot.sh`, `capture-reviews.sh`, `deploy-web-shell.sh`, `push-github.sh`, `NOTES.md` |
-| `stack/` | Web dev stack helpers: `dev.sh`, `kill-intensive.sh`, `dev-env/*`, `scripts/*` |
-| `systemd/` | User units for the nightly panel and the dev stack |
-| `cron/` | Crontabs for the two users (apply by hand after review) |
-| `docs/` | Instruction files the agents read (`gamedev-CLAUDE.md`, `stack-CLAUDE.md`) |
+| `cron/gamedev.crontab` | Queue watcher, Pterodactyl schedule, `fleet-watchdog.sh` every 3 minutes |
+| `cron/core.crontab` | Core user's jobs |
+| `systemd/stack-dev.service` | User unit keeping the city and processing dev servers up |
 
-## Install
+Apply crontabs by hand after review: `sudo -u gamedev crontab cron/gamedev.crontab`. The Nightly panel itself is installed by `install-nightly.sh`, not by a unit here.
 
-These scripts sit on top of [nightly](https://github.com/gamemann/nightly), the web panel and CLI that schedules the agents, tracks their tasks and lets them coordinate on a shared board. Install that first.
+## Installers
 
-1. Set up the panel (Node.js and npm required):
+| File | What |
+|---|---|
+| `install.sh` | Links scripts into their live paths for one user; existing files are kept as `*.pre-nightly-env` |
+| `install-nightly.sh` | Machine-level Nightly parts: nightly-node daemon, nginx site, scc |
+| `restore.sh` | Clones every repo in the manifest for one user, then runs `install.sh` |
+| `manifest-repos.tsv` | user, path, remote, branch for every checkout (`link` rows are symlinks to renamed checkouts) |
+| `manifest-private-files*.tsv` | Private files to back up (the real one is git-ignored) |
 
-```
-git clone https://github.com/gamemann/nightly ~/stack/nightly
-cd ~/stack/nightly
-npm install
-npm run db:push
-npm run build
-```
-
-2. Keep it running with the included user unit, then open the panel on port 3010 and add a runner script, a prompt and a schedule (the nightly README walks through it):
+## Tests
 
 ```
-mkdir -p ~/.config/systemd/user
-cp deploy/nightly-panel.service ~/.config/systemd/user/
-systemctl --user daemon-reload && systemctl --user enable --now nightly-panel
-loginctl enable-linger $USER
+tests/test_heavy_shared_files.sh
+tests/test_hv_infra_retry.sh
 ```
 
-3. Clone this repository and link its scripts into place. My setup uses two Linux users, `core` for the web projects and `gamedev` for the Godot games, so there is one install per user; adjust the paths in `install.sh` to your own layout:
+## Private values
+
+Hostnames, IPs and key paths come from `~/.config/nightly-env/env` (mode 600; override with `NIGHTLY_ENV_FILE`), outside the repo:
 
 ```
-git clone https://github.com/gamemann/nightly-env /home/core/projects/nightly-env
-sudo -u gamedev /home/core/projects/nightly-env/install.sh gamedev
-sudo -u core    /home/core/projects/nightly-env/install.sh core
-sudo install -m755 /home/core/projects/nightly-env/bin/heavy /usr/local/bin/heavy   # root
+DEVDB_HOST=<dev database host>
+FLEET_BOXES="staging:user@host staging02:user@host ph:user@host"
 ```
 
-4. Create the private env file described below (hostnames and addresses of your own machines).
+`.gitignore` blocks env files, keys, certificates and databases. Recovery steps: [docs/RECOVERY.md](docs/RECOVERY.md). Agent instruction files: [docs/gamedev-CLAUDE.md](docs/gamedev-CLAUDE.md), [docs/stack-CLAUDE.md](docs/stack-CLAUDE.md).
 
-Existing files are kept as `*.pre-nightly-env`. The `gamedev` user reads through the symlinks (`/home/core` is traversable). Commit and push as `core`: `sudo -u core git -C /home/core/projects/nightly-env ...`.
+## Install and restore
 
-## Where private values live
-
-This repository is public, so hostnames, IPs, credentials and key paths are not stored here. Scripts read them from a private env file outside the repo, `~/.config/nightly-env/env` (override with `NIGHTLY_ENV_FILE`, mode 600), for example:
+Fresh box, as `core` after it has a GitHub SSH key:
 
 ```
-DEVDB_HOST=<dev database host/IP>                                   # bin/ph-smoke
-FLEET_BOXES="staging:user@host staging02:user@host ph:user@host"    # bin/fleet-watchdog.sh
+git clone git@github.com:gamemann/nightly-env.git /home/core/projects/nightly-env
+cd /home/core/projects/nightly-env
+sudo -u core    ./restore.sh core      # clone repos, link scripts
+sudo -u gamedev ./restore.sh gamedev
+sudo install -m755 bin/heavy /usr/local/bin/heavy
+./install-nightly.sh --planet --dry-run   # then without --dry-run; --station on offload boxes
 ```
 
-The list of private files to back up is `manifest-private-files.tsv` (git-ignored; see `manifest-private-files.example.tsv`). `.gitignore` blocks env files, keys, certificates and databases. Edit scripts here (the symlink path is fine), then commit and push.
+Then restore the private files, apply the crontabs and enable the units (`systemctl --user enable --now stack-dev`). Only linking, no cloning: `./install.sh core|gamedev`. Full steps: [docs/RECOVERY.md](docs/RECOVERY.md).
