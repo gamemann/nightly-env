@@ -29,7 +29,7 @@ case "$who" in
     for f in profile city games-stack processing; do link stack/dev-env/$f.sh /home/core/projects/dev-env/$f.sh; done
     for f in check-layout-sync.mjs check-layout-sync.sh claude-usage.sh; do link stack/scripts/$f /home/core/projects/scripts/$f; done
     mkdir -p /home/core/.config/systemd/user
-    for f in nightly-panel stack-dev; do link systemd/$f.service /home/core/.config/systemd/user/$f.service; done
+    for f in stack-dev; do link systemd/$f.service /home/core/.config/systemd/user/$f.service; done
     link docs/stack-CLAUDE.md /home/core/projects/CLAUDE.md ;;
   *) echo "usage: $0 gamedev|core" >&2; exit 2 ;;
 esac

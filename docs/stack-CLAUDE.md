@@ -29,7 +29,7 @@ $N agent leave <short-name>                                 # when you are done
 - A refused claim means another live session is changing that path: do not edit it.
   Message the holder, and tell the user who holds it and what they are doing.
   Do not use `--force` unless the user says to.
-- Paths are relative to `~/stack` (`website-city`, `nightly`); work on x-tmc-dev02 is claimed as `dev02:<path under ~ there>` (`dev02:godot/gs-map`); a claim on a
+- Paths are relative to `~/stack` (`website-city`, `nightly`); the game tree is claimed as `godot/<repo>`; a claim on a
   repository covers everything inside it.
 
 ## Spawning agents: pick the cheapest model that can do it
@@ -42,7 +42,7 @@ Usage is mostly context re-read on every call, so agent size and model are the c
 
 ## Memory: builds and suites go through `heavy`
 
-Both VMs ran out of RAM when parallel agents built and tested at the same time, and the host killed x-tmc-dev01 (2026-10-16). Every build, smoke/verify run, Playwright run, type-check, cargo build and Godot run goes through **`heavy -- <command>`** on the VM that runs it. A Bash hook refuses the bare command and prints the rewrite. `heavy` queues jobs per VM (one build or suite, two checks) and waits for free memory. Put long runs in `run_in_background`; `heavy --status` shows the queue. Run **at most three sub-agents at a time, and at most two of them builders** (or anything else that runs suites): `heavy` runs one build or suite per VM, so a third builder mostly waits in the queue while its 5-minute prompt cache expires and must be re-written. Everything the `christian` user runs is also capped (`user-1000.slice` MemoryMax), so a job that overshoots kills itself, not the VM. Details: `~/stack/nightly/scripts/heavy/README.md` on x-tmc-dev01.
+The VMs ran out of RAM when parallel agents built and tested at the same time, and the host killed one (2026-10-16). Every build, smoke/verify run, Playwright run, type-check, cargo build and Godot run goes through **`heavy -- <command>`** on the VM that runs it. A Bash hook refuses the bare command and prints the rewrite. `heavy` queues jobs (one build or suite, two checks) and waits for free memory. Put long runs in `run_in_background`; `heavy --status` shows the queue. Run **at most three sub-agents at a time, and at most two of them builders** (or anything else that runs suites): `heavy` runs one build or suite per VM, so a third builder mostly waits in the queue while its 5-minute prompt cache expires and must be re-written. Everything the `christian` user runs is also capped (`user-1000.slice` MemoryMax), so a job that overshoots kills itself, not the VM. Details: `scripts/heavy/README.md` in the Nightly repo.
 
 ## Finishing a task: nothing narrowed in silence
 
@@ -61,12 +61,6 @@ Every repository follows website-city's layout:
 
 When you learn something while working, add the rule where it applies, in one line, and the story to `docs/history.md` only if the bug could come back. Do not append a dated section to `CLAUDE.md`.
 
-## Game development moved to x-tmc-dev02
+## One VM
 
-Since 2026-10-14, TMC game development (the Godot tree, `gs-*` addons, games, map repos, `docs/`) lives on **`x-tmc-dev02`**, in `~/godot` and `~/docs` there. `~/stack/game-dev` on this machine is gone; never recreate it. This VM (`x-tmc-dev01`) stays the app and web VM, and the game VM uses this one's website-city, PostgreSQL, Redis and nginx (`tmcdev.net`) rather than running its own.
-
-**You have full access to x-tmc-dev02**: `ssh -i ~/.ssh/dev02 x-tmc-dev02` (user `christian`, `<dev02 internal hostname>`, `<dev02 IP>`). Read, edit, run Godot suites, commit and push there as you would here. Claude Code is installed there (`~/.local/bin/claude`); its own `~/CLAUDE.md` is the game tree's rules, read it before game work. Passwordless `sudo` works there (since 2026-10-14).
-
-**x-tmc-dev02 has full access back to this VM** (`ssh -i ~/.ssh/dev01 x-tmc-dev01` from there), and Claude sessions there are expected to read, edit and run things in `~/stack`, start dev servers, and tunnel to PostgreSQL/Redis. Do not treat a dev02 session's work here as foreign.
-
-**Sessions on the two VMs coordinate through this board.** A dev02 session runs `~/stack/nightly/bin/nightly agent …` over SSH, with the same rules: join, claim before editing (a `~/stack` repo, or `dev02:<path>` for its own tree), `say` and `inbox` to hand over or warn, release, leave. If you need something done on dev02 while a session is live there, message it on the board rather than editing under it.
+Since 2026-11 there is a single development VM: the web stack (`~/stack`, user `core`) and the Godot tree (`~/godot`, `~/docs`, user `gamedev`) live side by side on it. The old dev01/dev02 split is gone; ignore any older note that names `x-tmc-dev01` or `x-tmc-dev02`. Game rules are in `~/godot/CLAUDE.md` (`docs/gamedev-CLAUDE.md` here); claims for the game tree use the plain path, for example `godot/gs-map`.

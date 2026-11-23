@@ -85,7 +85,7 @@ declare -A DESC=(
     [app]="tmc-app                 vite dev on :5173  (desktop shell's web half)"
     [spy]="Spy                     Go query daemon -- built, then run"
     [bot]="spy-discord-bot         TypeScript -- built, then run from dist/"
-    [nightly]="nightly                 next dev on :3010  (the nightly run's to-do panel)"
+    [nightly]="nightly                 next dev on :3010  (the Nightly panel; production: install-nightly.sh)"
 )
 
 declare -A COLOR=(

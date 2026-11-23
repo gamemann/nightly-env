@@ -6,10 +6,10 @@
 #
 # Why: parallel agents each "checked nothing heavy was running" and then all started a
 # `next build` / smoke run / Godot suite at once. The guest filled its RAM, the host ran out
-# and killed the whole VM (x-tmc-dev01, 2026-10-16). A check-then-start rule is a race;
+# and killed the whole VM (2026-10-16, back when there were two VMs). A check-then-start rule is a race;
 # this is a lock. The Bash hook (heavy-gate.py) refuses those commands unless they go
 # through here. Smoke-class runs additionally wait for an empty agent board (heavy-smoke.py).
-# See ~/stack/nightly/scripts/heavy/README.md.
+# See scripts/heavy/README.md in the Nightly repo (/home/core/projects/nightly).
 #
 # Each job runs in its own systemd scope capped at HEAVY_JOB_MAX_GB (default 12), or at the
 # memory free when it starts less HEAVY_JOB_HEADROOM_GB if that is lower, with no swap, so a
