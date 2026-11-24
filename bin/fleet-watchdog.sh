@@ -105,3 +105,18 @@ done < <(pgrep -u gamedev -f '^bash /usr/local/bin/heavy -- ' -a 2>/dev/null | s
   [ "$busy" -ge "$nslots" ] && [ "$free_remote" -gt 0 ] && [ "$bad" -gt 0 ] && echo "ALERT=local lane full while boxes idle: $bad jobs use a non-offerable form (use /home/gamedev/bin/hv)"
   [ "$busy" -ge "$nslots" ] && [ "$free_remote" -gt 4 ] && [ "$bad" = 0 ] && echo "ALERT=local lane full, boxes idle, jobs look eligible: check gpu.sh offer (heavy offers every 15 s)"
 } > "$D/health.txt"
+
+# 4. (2026-11-23) the published-artifact nightly: once a day, after 04:00, judge the CURRENTLY PUBLISHED prod shell pck and every
+#    published game (tools/published_artifact_nightly.sh: static check + dedicated-server boot). It runs detached through hv's local
+#    lane (a boot needs the built ./server tree here); a red night files/notes the nightly item published-artifact-drift itself.
+#    Stamp: ~/.fleet/published-artifact.last (date of the last start); log: ~/.fleet/published-artifact.log (last run only).
+PAN_REPO=/home/gamedev/godot/gs-server-deploy
+if [ "$(date +%H)" -ge 4 ] && [ -x "$PAN_REPO/tools/published_artifact_nightly.sh" ] && [ -x "$PAN_REPO/server" ] &&
+   [ "$(cat "$D/published-artifact.last" 2>/dev/null)" != "$(date +%F)" ] && ! pgrep -u gamedev -f 'published_artifact_nightly\.sh' >/dev/null; then
+  date +%F > "$D/published-artifact.last"
+  act "STARTED published_artifact_nightly (log $D/published-artifact.log)"
+  ( cd "$PAN_REPO" && /home/gamedev/bin/hv "$PAN_REPO" local tools/published_artifact_nightly.sh > "$D/published-artifact.log" 2>&1
+    rc=$?; printf '%s published_artifact_nightly exit %s\n' "$(ts)" "$rc" >> "$D/actions.log"
+    echo "published_artifact_nightly_last=$(ts) exit=$rc" > "$D/published-artifact.status" ) >/dev/null 2>&1 &
+fi
+[ -f "$D/published-artifact.status" ] && cat "$D/published-artifact.status" >> "$D/health.txt"
