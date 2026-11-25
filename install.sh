@@ -26,7 +26,7 @@ case "$who" in
     link bin/ph-smoke /home/core/bin/ph-smoke
     link stack/dev.sh /home/core/projects/dev.sh
     link stack/kill-intensive.sh /home/core/projects/kill-intensive.sh
-    for f in profile city games-stack processing; do link stack/dev-env/$f.sh /home/core/projects/dev-env/$f.sh; done
+    for f in profile city city-watch games-stack processing; do link stack/dev-env/$f.sh /home/core/projects/dev-env/$f.sh; done
     for f in check-layout-sync.mjs check-layout-sync.sh claude-usage.sh; do link stack/scripts/$f /home/core/projects/scripts/$f; done
     mkdir -p /home/core/.config/systemd/user
     for f in stack-dev; do link systemd/$f.service /home/core/.config/systemd/user/$f.service; done
