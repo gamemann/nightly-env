@@ -71,7 +71,14 @@ cd "$wt" || { echo "hv: no such worktree $wt" >&2; exit 2; }
 # 2026-11-11 (nightly zz-ph-stores-link-1): a worktree made by another user (christian) is not writable by gamedev, so the
 # pre-flight "mkdir .stores" and godot "mkdir .godot" failed with Permission denied. Open it up once (other users' ~/wt
 # dirs are 777 already); chmod does not follow symlinks, .git (a file in worktrees) is left alone.
-if [ ! -w . ] && [ "$mode" != baseline ]; then sudo -n chmod -R a+rwX . 2>/dev/null || echo "hv: WARNING $PWD is not writable by $(id -un) and chmod failed" >&2; fi
+# 2026-11-19: NEVER chmod outside a worktree dir. This once ran on /home/christian (-> 777 home, broke sshd StrictModes/key auth).
+# Only chmod a real dir directly under */wt/, never recurse into .ssh or a home dir.
+if [ ! -w . ] && [ "$mode" != baseline ]; then
+  case "$(pwd -P)" in
+    /home/*/wt/?*) sudo -n find . -path ./.ssh -prune -o ! -type l -exec chmod a+rwX {} + 2>/dev/null || echo "hv: WARNING $PWD is not writable by $(id -un) and chmod failed" >&2 ;;
+    *) echo "hv: WARNING $PWD is not writable by $(id -un); refusing to chmod outside /home/*/wt/<worktree>" >&2 ;;
+  esac
+fi
 [ -f project.godot ] || [ "$mode" = local ] || { echo "hv: $wt has no project.godot (only 'hv <dir> local ...' works for non-Godot repos)" >&2; exit 2; }
 export PATH=/home/gamedev/.cargo/bin:/home/gamedev/.local/bin:$PATH   # cargo for hv local (non-login shells lack it)
 # 2026-11-11 (nightly 1723): gpu.sh offers only a PWD directly under gamedev's WT_ROOT (/home/gamedev/wt) or ~/godot. Worktrees
@@ -94,8 +101,8 @@ esac
 # unset GPU_OFFLOAD). Only GODOT is cleared.
 unset GODOT
 # 2026-11-08: dev02 (47GB, swapping) ran 5 suites locally and never queued, so PH (40c, mostly idle) and staging got no offers.
-# 2026-11-11: 2 local build slots (was 1: a 90 min job starved all local-only jobs). Only 2 local build slots for hv jobs; the rest wait and are offered to PH/staging02/staging every 15 s. HEAVY_SLOTS_BUILD in env overrides.
-export HEAVY_SLOTS_BUILD=${HEAVY_SLOTS_BUILD:-2}
+# 2026-11-24: 1 local build slot (VM hit 0 GB free with 12 agents; PH sat at 43/44 free). Was: 2 local build slots (was 1: a 90 min job starved all local-only jobs). Only 2 local build slots for hv jobs; the rest wait and are offered to PH/staging02/staging every 15 s. HEAVY_SLOTS_BUILD in env overrides.
+export HEAVY_SLOTS_BUILD=${HEAVY_SLOTS_BUILD:-1}
 t=${HV_TIMEOUT:-2400}
 
 # Pre-flight (2026-11-07, v2 same day): a fresh/zombie worktree has only tracked files. It links what the project needs
@@ -118,6 +125,23 @@ hv_resolve() { # addon name -> prints source dir
   done
   return 1
 }
+# 2026-11-25: the shared native libraries (gs-sim, gs-net) are fetched only when someone runs gs-bootstrap, so a game
+# pull that bumps "# bootstrap-natives:" left every hv run on the old library (gs-sim v0.2.12 had no set_flat_world: all
+# probes measured the GDScript motor, silently). Say it loudly when a pin is newer than the installed library's stamp.
+hv_native_check() {
+  [ -f .gitignore ] || return 0
+  local repo tag addon lib have d
+  while read -r repo tag addon lib; do
+    [ -n "$repo" ] && [ -n "$tag" ] || continue
+    d=$(hv_resolve "$addon") || continue
+    d=$(readlink -f "$d")
+    have=$(cut -d' ' -f1 "$d/$lib/.natives-linux-x86_64" 2>/dev/null) || have=""
+    [ -z "$have" ] && continue   # no stamp: built here or tracked in git (gs-net), not fetched
+    if [ "$have" != "$tag" ] && [ "$(printf '%s\n%s\n' "$have" "$tag" | sort -V | tail -n 1)" = "$tag" ]; then
+      echo "hv: WARNING ******** $repo library is $have but this checkout pins $tag: runs use the OLD native library (or the script fallback). Refresh: sudo -u gamedev ~/godot/gs-bootstrap/bootstrap.sh --links --only <game>  (stamp: $d/$lib/.natives-linux-x86_64)" >&2
+    fi
+  done < <(awk '/^# bootstrap-natives: /{r=$3; t=$4; l=($5=="" ? "bin" : $5); a=r; sub("^gs-","gs_",a); gsub("-","_",a); print r, t, a, l}' .gitignore)
+}
 hv_preflight() {
   [ -f .gitignore ] || [ -f project.godot ] || return 0
   local main common n t d path src missing="" queue=() i
@@ -125,7 +149,7 @@ hv_preflight() {
   common=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null) && main=$(dirname "$common") || main=""
   [ "$main" = "$PWD" ] && main=""
   # hard needs
-  [ -f .gitignore ] && while read -r n; do queue+=("$n"); done < <(sed -n 's|^/addons/\([A-Za-z0-9_]*\)/\{0,1\}[[:space:]]*$|\1|p' .gitignore)
+  [ -f .gitignore ] && while read -r n; do queue+=("$n"); done < <(sed -n 's|^/addons/\([A-Za-z0-9_]*\)/\{0,1\}[[:space:]]*$|\1|p' .gitignore | grep -vx maps)  # addons/maps is dot-map's local-maps root, not an addon
   [ -f project.godot ] && while read -r n; do queue+=("$n"); done < <(grep -oE 'res://addons/[A-Za-z0-9_]+' project.godot | sed 's|res://addons/||' | sort -u)
   [ -d addons ] && while read -r d; do queue+=("${d##*/}"); done < <(find addons -maxdepth 1 -xtype l 2>/dev/null)
   if [ -n "$main" ] && [ -d "$main/addons" ]; then
@@ -135,6 +159,7 @@ hv_preflight() {
   while [ $i -lt ${#queue[@]} ]; do
     n=${queue[$i]}; i=$((i+1))
     [ -z "$n" ] && continue
+    n=${n/#dot_/gs_}   # 2026-11-22: the old prefix is retired; stale dot_* links/lines in a checkout map to the gs_ addon
     [ -n "${seen[$n]:-}" ] && continue; seen[$n]=1
     if [ ! -e "addons/$n" ]; then
       if t=$(hv_resolve "$n"); then
@@ -145,6 +170,10 @@ hv_preflight() {
     t=$(readlink -f "addons/$n" 2>/dev/null) || continue
     d=${t%/*}   # <repo>/addons
     [ -d "$d" ] && while read -r src; do queue+=("${src##*/}"); done < <(find "$d" -maxdepth 1 -type l 2>/dev/null)
+    # 2026-11-21: also the addon repo's own .gitignore '/addons/<n>' lines: a dependency added there (gs-stats -> gs_save)
+    # is not a link in its checkout until someone makes one, so the link scan above misses it and the synced tree lacks
+    # the addon ("GSSaveStoreFile not found", exit 139 on staging02).
+    [ -f "${d%/*}/.gitignore" ] && while read -r src; do queue+=("$src"); done < <(sed -n 's|^/addons/\([A-Za-z0-9_]*\)/\{0,1\}[[:space:]]*$|\1|p' "${d%/*}/.gitignore" | grep -vx maps)
   done
   [ -f .gitignore ] && while IFS=$'\t' read -r path src; do
     [ -n "$path" ] || continue; path=${path#/}; path=${path%/}
@@ -166,7 +195,10 @@ hv_preflight() {
   #     job already rsyncs the main checkout's tree with --copy-links, so the box gets the same bytes it always did. Tool jobs
   #     list `git ls-files -co --exclude-standard`, which still omits it (gitignored).
   # Only targets outside ~/wt are linked: another worktree's private files are never shared. Undo: rm the symlinks.
-  if [ -n "$main" ] && [ "$(basename "$main")" = gs-server-deploy ]; then
+  # 2026-11-22: the repo is gs-server-deploy now (the old basename test never matched, so games/, client/auth.json and the
+  # addon list were never linked); the addon list comes from addons.lock (repo gs-x -> addons/gs_x), not from the main
+  # checkout's addons/ (stale gs_* copies from before the rename).
+  if [ -n "$main" ] && case $(basename "$main") in gs-server-deploy|dot-server-deploy) true ;; *) false ;; esac; then
     dsd_ok() { case $1 in "$HOME"/wt/*|/home/gamedev/wt/*) return 1 ;; esac; [ -n "$1" ] && [ -e "$1" ]; }
     if [ -d "$main/games" ]; then
       for g in "$main"/games/* "$main"/games/.gdignore; do
@@ -178,9 +210,19 @@ hv_preflight() {
         else echo "hv: not linking games/$n: $t is missing or in ~/wt (another worktree's): not linked" >&2; fi
       done
     fi
+    if [ -f "$main/addons.lock" ]; then
+      while IFS=$'\t' read -r r _; do
+        case $r in ''|\#*) continue ;; esac
+        n=${r//-/_}
+        { [ -e "addons/$n" ] || [ -L "addons/$n" ]; } && continue
+        if t=$(hv_resolve "$n") && dsd_ok "$t"; then mkdir -p addons && ln -s "$t" "addons/$n" && echo "hv: linked addons/$n -> $t" >&2
+        else echo "hv: addons.lock names $r but no addons/$n found" >&2; fi
+      done < "$main/addons.lock"
+    fi
     if [ -d "$main/addons" ]; then
       for a in "$main"/addons/*; do
         n=${a##*/}
+        case $n in dot_*) continue ;; esac   # retired prefix: stale copies/links, never relinked
         { [ -e "$a" ] || [ -L "$a" ]; } || continue
         { [ -e "addons/$n" ] || [ -L "addons/$n" ]; } && continue
         t=$(readlink -f "$a") || continue
@@ -217,7 +259,11 @@ hv_preflight() {
 hv_guard() {
   if [ "${HV_NO_GUARD:-0}" = 1 ]; then "$@"; return $?; fi
   local tmp pid tpid last=-1 lastt now sz q=${HV_PARSE_QUIET:-180} rc hit
-  tmp=$(mktemp /tmp/hv-guard.XXXXXX) || { "$@"; return $?; }
+  # Staging files go to HV_TMPDIR (default: disk, ~/.fleet/tmp; /tmp is a 21G tmpfs that 780 leaked files once filled).
+  # The trap removes the file when hv is killed (TERM/INT/HUP skipped the rm below); tmp-reaper is the backstop.
+  mkdir -p "${HV_TMPDIR:-$HOME/.fleet/tmp}" 2>/dev/null
+  tmp=$(mktemp "${HV_TMPDIR:-$HOME/.fleet/tmp}/hv-guard.XXXXXX" 2>/dev/null || mktemp /tmp/hv-guard.XXXXXX) || { "$@"; return $?; }
+  trap 'rm -f "$tmp"; trap - EXIT; exit 143' TERM INT HUP
   setsid "$@" >"$tmp" 2>&1 </dev/null & pid=$!
   tail -n +1 -f --pid=$pid "$tmp" 2>/dev/null & tpid=$!
   lastt=$(date +%s)
@@ -253,7 +299,9 @@ hv_infra_boxes() { # killed-box... -> the boxes still allowed, one line
 hv_infra() {
   local try=0 max=${HV_INFRA_RETRIES:-2} rc out k killed=() left
   while :; do
-    out=$(mktemp /tmp/hv-infra.XXXXXX) || { "$@"; return $?; }
+    mkdir -p "${HV_TMPDIR:-$HOME/.fleet/tmp}" 2>/dev/null
+    out=$(mktemp "${HV_TMPDIR:-$HOME/.fleet/tmp}/hv-infra.XXXXXX" 2>/dev/null || mktemp /tmp/hv-infra.XXXXXX) || { "$@"; return $?; }
+    trap 'rm -f "$out"; exit 143' TERM INT HUP
     "$@" 2>&1 | tee "$out"; rc=${PIPESTATUS[0]}
     k=$(sed -n 's/^gpu\.sh: INFRA KILL on \([A-Za-z0-9_-]*\):.*/\1/p' "$out" | tail -n 1)
     rm -f "$out"
@@ -397,7 +445,7 @@ hv_shard() {
   cat "$run/report.txt"
   exit $bad
 }
-case $mode in game|scene|import|shard|local) [ "${HV_NO_PREFLIGHT:-0}" = 1 ] || hv_preflight ;; esac
+case $mode in game|scene|import|shard|local) [ "${HV_NO_PREFLIGHT:-0}" = 1 ] || { hv_preflight; hv_native_check; } ;; esac
 # A scene in a fresh worktree (no class cache yet) cannot resolve class_name scripts: Godot prints "Failed to load
 # script" / "Parse Error" and then idles until the watchdog kills it 20 min later (43 such kills a day, 2026-11-08).
 # 2026-11-13: hv no longer imports here first. That separate local `heavy -- godot --import` ran for every fresh worktree
