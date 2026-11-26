@@ -133,12 +133,13 @@ hv_native_check() {
   local repo tag addon lib have d
   while read -r repo tag addon lib; do
     [ -n "$repo" ] && [ -n "$tag" ] || continue
-    d=$(hv_resolve "$addon") || continue
-    d=$(readlink -f "$d")
+    # 2026-11-26: read the lib THIS checkout loads (its own addons/<addon> link, e.g. a private gs-sim build), not the
+    # shared main checkout's; fall back to hv_resolve only when the checkout has no such addon yet.
+    if [ -e "addons/$addon" ]; then d=$(readlink -f "addons/$addon"); else d=$(hv_resolve "$addon") || continue; d=$(readlink -f "$d"); fi
     have=$(cut -d' ' -f1 "$d/$lib/.natives-linux-x86_64" 2>/dev/null) || have=""
     [ -z "$have" ] && continue   # no stamp: built here or tracked in git (gs-net), not fetched
     if [ "$have" != "$tag" ] && [ "$(printf '%s\n%s\n' "$have" "$tag" | sort -V | tail -n 1)" = "$tag" ]; then
-      echo "hv: WARNING ******** $repo library is $have but this checkout pins $tag: runs use the OLD native library (or the script fallback). Refresh: sudo -u gamedev ~/godot/gs-bootstrap/bootstrap.sh --links --only <game>  (stamp: $d/$lib/.natives-linux-x86_64)" >&2
+      echo "hv: WARNING ******** $repo library is $have but this checkout pins $tag: runs use the OLD native library (or the script fallback). Loaded from: $d (stamp: $d/$lib/.natives-linux-x86_64). Fix: point addons/$addon at a $tag build (worktree), or refresh the shared lib with gs-bootstrap (main checkout only)." >&2
     fi
   done < <(awk '/^# bootstrap-natives: /{r=$3; t=$4; l=($5=="" ? "bin" : $5); a=r; sub("^gs-","gs_",a); gsub("-","_",a); print r, t, a, l}' .gitignore)
 }
