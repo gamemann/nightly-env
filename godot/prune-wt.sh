@@ -71,10 +71,17 @@ for d in "$WT"/*/; do
 
   if [ "$dry" = 1 ]; then
     echo "would remove $name ($branch, merged into $base, clean, pushed)"
-  elif git --git-dir="$common" worktree remove -- "$d" 2>/dev/null; then
-    echo "removed $name ($branch)"
   else
-    echo "keep $name: git refused to remove it"; kept=$((kept+1)); continue
+    # The repo (and its .git/worktrees admin dir) may belong to another user (gamedev, core), so git
+    # fails with "Permission denied" when run as the caller. Run the removal as the owner of the
+    # common git dir. (Not a safe.directory problem: /etc/gitconfig already trusts every dir.)
+    owner=$(stat -c %U "$common" 2>/dev/null)
+    if [ -n "$owner" ] && [ "$owner" != "$(id -un)" ]; then gitrun="sudo -n -u $owner git"; else gitrun="git"; fi
+    if err=$($gitrun --git-dir="$common" worktree remove -- "$d" 2>&1); then
+      echo "removed $name ($branch)"
+    else
+      echo "keep $name: git refused to remove it as ${owner:-?}: $(printf '%s' "$err" | head -1)"; kept=$((kept+1)); continue
+    fi
   fi
   removed=$((removed+1))
 done
