@@ -7,7 +7,8 @@
 #   check-layout-sync.sh --quiet    no output when OK
 #
 # Checks: (1) the JSON: known fields, hrefs, icons NAV_ICONS has, roles/exact/modal
-# placement, unique entry paths, socials, copyright with {year} and the legal entity,
+# placement, header children's groupKey/group (a nav-groups.ts key plus its English
+# fallback), unique entry paths, socials, copyright with {year} and the legal entity,
 # formatting. (2) every site's catalogue, in every locale, has a string for every key
 # that site draws (city all; learn and processing skip role-gated entries; status also
 # the signed-in ones; the Astro sites through ShellCatalogKey). (3) every buildChrome

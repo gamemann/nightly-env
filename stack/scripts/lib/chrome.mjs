@@ -145,7 +145,10 @@ export function loadShared() {
         if (!chrome[k]) throw new Error(`${chromeFile} no longer exports ${k}`)
     const { NAV_ICONS } = loadModule(join(SHARED, 'src/components/nav.ts'), opts, cache)
     const { shellSidebar } = loadModule(resolveFile('./src/i18n/sidebar', join(SHARED, 'x'), {}), opts, cache)
-    return { ...chrome, iconNames: new Set(Object.keys(NAV_ICONS ?? {})), shellSidebar }
+    // Mega panel section headings (shared 4.20.0+); null before, so groupKey values go unchecked.
+    const groupsFile = resolveFile('./src/i18n/nav-groups', join(SHARED, 'x'), {})
+    const navGroupKeys = groupsFile ? new Set(Object.keys(loadModule(groupsFile, opts, cache).navGroups?.en ?? {})) : null
+    return { ...chrome, iconNames: new Set(Object.keys(NAV_ICONS ?? {})), shellSidebar, navGroupKeys }
 }
 
 /* ------------------------------------------------------------- sites */

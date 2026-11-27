@@ -42,7 +42,7 @@ const SITES = [
     { name: 'website-status', repo: STATUS, site: 'status', role: false, signedIn: false },
 ]
 
-const LEAF_KEYS = new Set(['labelKey', 'label', 'descKey', 'desc', 'href', 'icon', 'external', 'requiresAuth', 'roles', 'modal', 'exact', 'children'])
+const LEAF_KEYS = new Set(['labelKey', 'label', 'descKey', 'desc', 'href', 'icon', 'external', 'requiresAuth', 'roles', 'modal', 'exact', 'children', 'groupKey', 'group'])
 const SECTION_KEYS = new Set(['labelKey', 'label', 'icon', 'roles', 'items'])
 const COLUMN_KEYS = new Set(['headingKey', 'heading', 'links'])
 const TOP_KEYS = new Set(['$comment', 'header', 'sidebar', 'footer', 'socials', 'slogan', 'copyright', 'legalEntity'])
@@ -80,6 +80,13 @@ function validate(d, shared) {
         if (e.modal !== undefined && !str(e.modal)) out.push(`${where}: modal must be a pop-up kind`)
         if (e.exact && surface !== 'rail') out.push(`${where}: exact is only read on the rail`)
         if (e.children && surface !== 'header') out.push(`${where}: only header entries have children`)
+        // A mega panel section heading: translated by tmc-global's i18n/nav-groups.ts, so no site catalogue carries it.
+        if (e.groupKey !== undefined || e.group !== undefined) {
+            if (surface !== 'header-child') out.push(`${where}: groupKey/group only name a header child's mega panel section`)
+            else if (!str(e.groupKey) || !str(e.group)) out.push(`${where}: groupKey needs group (the English fallback), and group needs groupKey`)
+            else if (shared.navGroupKeys && !shared.navGroupKeys.has(e.groupKey))
+                out.push(`${where}: groupKey ${JSON.stringify(e.groupKey)} has no navGroups entry (tmc-global i18n/nav-groups.ts)`)
+        }
         if (surface === 'footer' && (e.icon || e.modal || e.descKey)) out.push(`${where}: the footer draws no icon, pop-up or description`)
     }
 
