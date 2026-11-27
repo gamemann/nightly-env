@@ -132,7 +132,7 @@ hv_resolve() { # addon name -> prints source dir
 # links into the SHARED checkout (~/godot/<repo>, whichever pin was fetched there last; it was v0.2.33 while FC pinned
 # v0.2.35) is relinked to gs-bootstrap tools/natives_pin.sh's per-tag directory (~gamedev/.cache/gs-natives/<repo>/<tag>,
 # built once from the release, checksum-checked). gpu.sh syncs with --copy-links, so PH, staging02 and staging get those
-# bytes too. A private build (a link into ~/wt) is kept. hv then REFUSES (exit 4) when the loaded stamp differs from the
+# bytes too. A private build (a link into ~/wt) is kept and only warned about. hv then REFUSES (exit 4) when the loaded stamp differs from the
 # pin, older or newer: the game falls back to GDScript per missing method, which is what hid the old library.
 # No stamp = built here or tracked in git (gs-net): nothing to compare, nothing relinked.
 HV_NATIVES_PIN=${HV_NATIVES_PIN:-/home/gamedev/godot/gs-bootstrap/tools/natives_pin.sh}
@@ -154,6 +154,11 @@ hv_native_check() {
           [ "$(readlink "addons/$addon" 2>/dev/null)" = "$t" ] || { ln -sfn "$t" "addons/$addon" && echo "hv: linked addons/$addon -> $t (pinned $tag)" >&2; }
           d=$t; have=$(cut -d' ' -f1 "$d/$lib/.natives-linux-x86_64" 2>/dev/null) || have=""
         fi ;;
+    esac
+    case "$d" in
+      /home/*/wt/*)   # private build: kept on purpose; its stamp may carry a +branch suffix or a newer base
+        [ "${have%%+*}" = "$tag" ] || echo "hv: WARNING $repo private build at $d is $have; this checkout pins $tag (kept: a link into ~/wt is deliberate)." >&2
+        continue ;;
     esac
     if [ "$have" != "$tag" ]; then
       echo "hv: REFUSED ******** $repo library is $have but this checkout pins $tag. Loaded from: $d (stamp: $d/$lib/.natives-linux-x86_64). Fix: point addons/$addon at a $tag build, or remove the link so hv links the pinned cache." >&2
