@@ -127,19 +127,37 @@ hv_resolve() { # addon name -> prints source dir
 }
 # 2026-11-25: the shared native libraries (gs-sim, gs-net) are fetched only when someone runs gs-bootstrap, so a game
 # pull that bumps "# bootstrap-natives:" left every hv run on the old library (gs-sim v0.2.12 had no set_flat_world: all
-# probes measured the GDScript motor, silently). Say it loudly when a pin is newer than the installed library's stamp.
+# probes measured the GDScript motor, silently).
+# 2026-11-26: the run now loads exactly the pinned library, on every box. A checkout whose addons/<addon> is missing or
+# links into the SHARED checkout (~/godot/<repo>, whichever pin was fetched there last; it was v0.2.33 while FC pinned
+# v0.2.35) is relinked to gs-bootstrap tools/natives_pin.sh's per-tag directory (~gamedev/.cache/gs-natives/<repo>/<tag>,
+# built once from the release, checksum-checked). gpu.sh syncs with --copy-links, so PH, staging02 and staging get those
+# bytes too. A private build (a link into ~/wt) is kept. hv then REFUSES (exit 4) when the loaded stamp differs from the
+# pin, older or newer: the game falls back to GDScript per missing method, which is what hid the old library.
+# No stamp = built here or tracked in git (gs-net): nothing to compare, nothing relinked.
+HV_NATIVES_PIN=${HV_NATIVES_PIN:-/home/gamedev/godot/gs-bootstrap/tools/natives_pin.sh}
 hv_native_check() {
   [ -f .gitignore ] || return 0
-  local repo tag addon lib have d
+  local repo tag addon lib have d t
   while read -r repo tag addon lib; do
     [ -n "$repo" ] && [ -n "$tag" ] || continue
-    # 2026-11-26: read the lib THIS checkout loads (its own addons/<addon> link, e.g. a private gs-sim build), not the
-    # shared main checkout's; fall back to hv_resolve only when the checkout has no such addon yet.
     if [ -e "addons/$addon" ]; then d=$(readlink -f "addons/$addon"); else d=$(hv_resolve "$addon") || continue; d=$(readlink -f "$d"); fi
     have=$(cut -d' ' -f1 "$d/$lib/.natives-linux-x86_64" 2>/dev/null) || have=""
     [ -z "$have" ] && continue   # no stamp: built here or tracked in git (gs-net), not fetched
-    if [ "$have" != "$tag" ] && [ "$(printf '%s\n%s\n' "$have" "$tag" | sort -V | tail -n 1)" = "$tag" ]; then
-      echo "hv: WARNING ******** $repo library is $have but this checkout pins $tag: runs use the OLD native library (or the script fallback). Loaded from: $d (stamp: $d/$lib/.natives-linux-x86_64). Fix: point addons/$addon at a $tag build (worktree), or refresh the shared lib with gs-bootstrap (main checkout only)." >&2
+    case "$d" in
+      /home/gamedev/godot/*|/home/gamedev/projects/godot/*)
+        if [ ! -e "addons/$addon" ] || [ -L "addons/$addon" ]; then
+          if ! t=$("$HV_NATIVES_PIN" "$repo" "$tag" "$addon" "$lib"); then
+            echo "hv: REFUSED ******** could not build the pinned $repo $tag library ($HV_NATIVES_PIN). Runs would load the shared $have." >&2
+            exit 4
+          fi
+          [ "$(readlink "addons/$addon" 2>/dev/null)" = "$t" ] || { ln -sfn "$t" "addons/$addon" && echo "hv: linked addons/$addon -> $t (pinned $tag)" >&2; }
+          d=$t; have=$(cut -d' ' -f1 "$d/$lib/.natives-linux-x86_64" 2>/dev/null) || have=""
+        fi ;;
+    esac
+    if [ "$have" != "$tag" ]; then
+      echo "hv: REFUSED ******** $repo library is $have but this checkout pins $tag. Loaded from: $d (stamp: $d/$lib/.natives-linux-x86_64). Fix: point addons/$addon at a $tag build, or remove the link so hv links the pinned cache." >&2
+      exit 4
     fi
   done < <(awk '/^# bootstrap-natives: /{r=$3; t=$4; l=($5=="" ? "bin" : $5); a=r; sub("^gs-","gs_",a); gsub("-","_",a); print r, t, a, l}' .gitignore)
 }
